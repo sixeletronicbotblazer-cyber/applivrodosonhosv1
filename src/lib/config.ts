@@ -22,7 +22,12 @@ function env(name: string): string | undefined {
 
 export const config = {
   get demoMode(): boolean {
-    if (env('DEMO_MODE') !== undefined) return env('DEMO_MODE') === 'true'
+    const explicit = env('DEMO_MODE')
+    if (explicit !== undefined) return explicit === 'true'
+    // Deployment público na Vercel sem variável configurada = prévia demonstrável
+    // (acesso de demonstração por e-mail). Para produção real (compra obrigatória),
+    // defina explicitamente DEMO_MODE=false no painel da Vercel.
+    if (process.env.VERCEL === '1') return true
     return process.env.NODE_ENV !== 'production'
   },
   /** Exibe o código OTP na resposta APENAS quando SMTP não está configurado e DEMO_MODE ativo.

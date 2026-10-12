@@ -99,6 +99,30 @@ distinção de planos continua testável. **Esse comportamento só existe com
 > (DEMO_MODE). Isso está documentado AQUI e nunca é exibido na tela do
 > comprador.
 
+## Deploy na Vercel
+
+O projeto é deployado automaticamente na Vercel via integração Git (push em
+`main` = novo deployment de produção no domínio público
+`applivrodosonhosv1.vercel.app`).
+
+Adaptações de serverless feitas para o deployment funcionar:
+
+- **`prisma/schema.prisma`** — `binaryTargets` incluem os runtimes Amazon Linux
+  da Vercel (`rhel-openssl-1.0.x` e `rhel-openssl-3.0.x`), além do `native`.
+- **`src/lib/db.ts`** — no cold start do lambda, o banco empacotado
+  (`db/custom.db`, incluído via `outputFileTracingIncludes` no
+  `next.config.ts`) é copiado para `/tmp` (único diretório gravável); a
+  instância quente reutiliza o arquivo. Local, nada muda.
+- **`package.json`** — `build` executa `prisma generate` antes do `next build`.
+- **`vercel.json`** — `DEMO_MODE=true`: o domínio público funciona como PRÉVIA
+  (acesso de demonstração por e-mail, fluxo completo para testes).
+- **Produção real (compras):** no painel da Vercel, defina explicitamente
+  `DEMO_MODE=false` + `CAKTO_WEBHOOK_SECRET`/`CAKTO_OFFER_*` — aí o acesso só
+  nasce de pagamento confirmado (mesma regra do `.env` local). Como o SQLite
+  de `/tmp` é efêmero por instância, produção com gravação persistente exige
+  banco gerenciado (ex.: Postgres/Turso) — a troca é só o `provider` +
+  `DATABASE_URL`.
+
 ## Integrações pendentes (código pronto, aguardando credenciais)
 
 1. **Cakto (obrigatório para acesso real em produção):** definir
