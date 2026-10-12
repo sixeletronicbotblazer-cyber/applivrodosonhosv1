@@ -4,10 +4,60 @@
 
 import { db } from '@/lib/db'
 import { config } from '@/lib/config'
-import { createHash, randomBytes, randomInt, timingSafeEqual } from 'crypto'
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from 'crypto'
 import { cookies, headers } from 'next/headers'
 
 export const SESSION_COOKIE = 'lds_session'
+
+// ── Token de sessão stateless (prévia serverless) ─────────────────────────
+// Na Vercel, cada rota de API é uma lambda com cópia própria do banco em /tmp:
+// a sessão gravada por /api/auth/access não existe nas outras instâncias. Na
+// prévia pública (DEMO_MODE + Vercel) a sessão é emitida também como token
+// assinado (HMAC) e validado SEM consultar o banco, ficando consistente entre
+// instâncias. Em produção (DEMO_MODE=false) a sessão continua 100% no banco.
+const STATELESS_PREFIX = 'lds1.'
+const STATELESS_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+function statelessEnabled(): boolean {
+  return process.env.VERCEL === '1' && config.demoMode
+}
+
+function statelessSecret(): string {
+  // VERCEL_URL é constante dentro do mesmo deployment: tokens morrem a cada
+  // novo deploy (re-login), o que é desejado na prévia.
+  return `lds-stateless::${process.env.VERCEL_URL ?? 'local'}::${config.otpPepper}`
+}
+
+function createStatelessToken(user: { id: string; email: string; role: string }): string {
+  const payload = { uid: user.id, em: user.email, ro: user.role, exp: Date.now() + STATELESS_TTL_MS }
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
+  const sig = createHmac('sha256', statelessSecret()).update(body).digest('base64url')
+  return `${STATELESS_PREFIX}${body}.${sig}`
+}
+
+function parseStatelessToken(token: string): AuthContext | null {
+  const rest = token.slice(STATELESS_PREFIX.length)
+  const dot = rest.lastIndexOf('.')
+  if (dot <= 0) return null
+  const body = rest.slice(0, dot)
+  const sig = rest.slice(dot + 1)
+  const expected = createHmac('sha256', statelessSecret()).update(body).digest('base64url')
+  const a = Buffer.from(sig)
+  const b = Buffer.from(expected)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString()) as {
+      uid: string
+      em: string
+      ro: string
+      exp: number
+    }
+    if (!payload?.em || !payload.exp || payload.exp < Date.now()) return null
+    return { userId: payload.uid, email: payload.em, role: payload.ro }
+  } catch {
+    return null
+  }
+}
 
 function hashCode(email: string, code: string): string {
   return createHash('sha256').update(`${email.toLowerCase()}::${code}::${config.otpPepper}`).digest('hex')
@@ -142,7 +192,10 @@ async function sessionCookieOptions(): Promise<{
  *  e devolve o token (o cliente guarda como fallback Bearer para contextos em
  *  que cookies não circulam, ex.: iframe cross-site do painel de prévia).
  *  Usada pelo acesso por e-mail (vínculo de compra / sessão de demonstração). */
-export async function createSession(user: { id: string }, ip: string): Promise<string> {
+export async function createSession(
+  user: { id: string; email: string; role: string },
+  ip: string,
+): Promise<string> {
   const token = randomBytes(32).toString('hex')
   await db.session.create({
     data: {
@@ -154,6 +207,10 @@ export async function createSession(user: { id: string }, ip: string): Promise<s
   })
   const jar = await cookies()
   jar.set(SESSION_COOKIE, token, await sessionCookieOptions())
+  // Prévia serverless: o cliente recebe o token assinado (validação sem banco);
+  // o cookie mantém o token do banco (mesmo comportamento em requisições da
+  // mesma instância).
+  if (statelessEnabled()) return createStatelessToken(user)
   return token
 }
 
@@ -180,8 +237,15 @@ export async function getAuth(req?: Request): Promise<AuthContext | null> {
   if (req) {
     const bearer = bearerToken(req)
     if (bearer) {
-      const viaBearer = await authFromToken(bearer)
-      if (viaBearer) return viaBearer
+      if (bearer.startsWith(STATELESS_PREFIX)) {
+        if (statelessEnabled()) {
+          const ctx = parseStatelessToken(bearer)
+          if (ctx) return ctx
+        }
+      } else {
+        const viaBearer = await authFromToken(bearer)
+        if (viaBearer) return viaBearer
+      }
     }
   }
   const jar = await cookies()

@@ -3,6 +3,8 @@
 // O acesso nasce de Entitlement.status === 'active' vinculado a pagamento confirmado.
 
 import { db } from '@/lib/db'
+import { config } from '@/lib/config'
+import { createHash } from 'crypto'
 import type { ProductKey } from '@/lib/config'
 
 export type EntitlementInfo = {
@@ -13,18 +15,47 @@ export type EntitlementInfo = {
   paymentId: string
 }
 
+/** Prévia pública na Vercel: cada rota de API roda em lambda própria, com cópia
+ *  do banco em /tmp — writes não são compartilhados entre instâncias. Para o
+ *  acesso de demonstração ficar consistente em QUALQUER instância, o entitlement
+ *  demo é DERIVADO do e-mail (sem escrita) quando não existe registro ativo.
+ *  Nunca ativo em produção (exige DEMO_MODE=false no painel). */
+function isServerlessDemoPreview(): boolean {
+  return process.env.VERCEL === '1' && config.demoMode
+}
+
+function demoPreviewEntitlements(email: string): EntitlementInfo[] {
+  const normalized = email.trim().toLowerCase()
+  // conta semeadas que representam estados especiais: pdf@ (só PDF, vem do banco)
+  // e outro@ (sem compra) — esta última NUNCA recebe o pacote demo.
+  if (normalized === 'outro@livrodossonhos.app') return []
+  return [
+    {
+      productKey: 'book_app',
+      status: 'active',
+      offerId: 'DEMO-OFFER-BOOK-APP',
+      grantedAt: new Date(),
+      paymentId: `demo-preview-${createHash('sha1').update(normalized).digest('hex').slice(0, 24)}`,
+    },
+  ]
+}
+
 export async function getActiveEntitlements(email: string): Promise<EntitlementInfo[]> {
   const rows = await db.entitlement.findMany({
     where: { buyerEmail: email.toLowerCase(), status: 'active' },
     orderBy: { grantedAt: 'desc' },
   })
-  return rows.map((r) => ({
-    productKey: r.productKey as ProductKey,
-    status: r.status,
-    offerId: r.offerId,
-    grantedAt: r.grantedAt,
-    paymentId: r.paymentId,
-  }))
+  if (rows.length > 0) {
+    return rows.map((r) => ({
+      productKey: r.productKey as ProductKey,
+      status: r.status,
+      offerId: r.offerId,
+      grantedAt: r.grantedAt,
+      paymentId: r.paymentId,
+    }))
+  }
+  if (isServerlessDemoPreview()) return demoPreviewEntitlements(email)
+  return []
 }
 
 export async function hasProduct(email: string, product: ProductKey): Promise<boolean> {
