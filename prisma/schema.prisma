@@ -1,0 +1,226 @@
+// Livro dos Sonhos — schema adaptado de schema.sql (referência PostgreSQL) para Prisma/SQLite.
+// Notas de adaptação:
+// - SQLite não possui enums nem CHECK: validações ficam na camada de aplicação (src/lib/*).
+// - Campos numéricos do jogo (dezena/centena/milhar) são String preservando zeros à esquerda.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ── Identidade e acesso ────────────────────────────────────────────────
+
+model User {
+  id           String        @id @default(cuid())
+  email        String        @unique
+  role         String        @default("USER") // USER | ADMIN
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     Session[]
+  savedEntries SavedEntry[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  ip        String?
+  userAgent String?
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model OtpCode {
+  id         String    @id @default(cuid())
+  email      String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+  ip         String?
+
+  @@index([email, createdAt])
+  @@map("otp_codes")
+}
+
+// Caixa de saída do transporte de e-mail em modo de desenvolvimento
+// (usada apenas quando SMTP não está configurado — nunca em produção).
+model DevMailbox {
+  id        String   @id @default(cuid())
+  toEmail   String
+  subject   String
+  body      String
+  code      String?
+  transport String   @default("dev")
+  createdAt DateTime @default(now())
+
+  @@index([toEmail, createdAt])
+  @@map("dev_mailbox")
+}
+
+// ── Conteúdo: verbetes, números, aliases, bichos, páginas ─────────────
+
+model DreamEntry {
+  id             String    @id // ex.: "pdf-046-01" | "ext-0111"
+  slug           String    @unique
+  title          String
+  sourceType     String // pdf_literal | editorial
+  sourcePdfPage  Int?
+  sourcePrintPage Int?
+  meaning        String?
+  relatedPdfId   String?
+  relatedPdf     DreamEntry?  @relation("EntryLinks", fields: [relatedPdfId], references: [id])
+  relatedEditorial DreamEntry[] @relation("EntryLinks")
+  category       String?
+  kind           String? // novo_simbolo_editorial | variacao_contextual | null
+  sourceNotes    String?
+  reviewStatus   String    @default("draft") // draft | reviewed | published
+  reviewerNote   String?
+  reviewedAt     DateTime?
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  association  NumberAssociation?
+  aliases      EntryAlias[]
+  savedBy      SavedEntry[]
+
+  @@index([reviewStatus])
+  @@index([sourceType])
+  @@index([slug])
+  @@map("dream_entries")
+}
+
+model NumberAssociation {
+  entryId         String  @id
+  entry           DreamEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  animal          String
+  groupNumber     Int? // 1–25
+  dezena          String? // "34"
+  centena         String? // "534"
+  milhar          String? // "8534"
+  loto            String? // "34, 09, 88, 47, 15" (informativo do verbete)
+  evidencePdfPage Int
+
+  @@map("number_associations")
+}
+
+model EntryAlias {
+  id              Int      @id @default(autoincrement())
+  entryId         String
+  entry           DreamEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  alias           String
+  normalizedAlias String
+  kind            String? // variacao_contextual | revisao_manual
+  status          String   @default("draft") // draft | active
+  createdAt       DateTime @default(now())
+
+  @@unique([entryId, normalizedAlias])
+  @@index([normalizedAlias])
+  @@map("entry_aliases")
+}
+
+// Tabela dos 25 bichos — reconstruída do OCR (página 4 do PDF não acompanhou o pacote).
+model AnimalGroup {
+  groupNumber  Int      @id // 1–25
+  animal       String
+  dezenas      String // "01,02,03,04"
+  verification String   @default("ocr_aggregated") // verified_page | ocr_aggregated
+  sourceNote   String?
+  updatedAt    DateTime @updatedAt
+
+  @@map("animal_groups")
+}
+
+model BookPage {
+  pdfPage      Int      @id
+  printPage    Int?
+  imagePath    String?  // ex.: /book/pagina-046.jpg
+  ocrText      String?
+  reviewStatus String   @default("draft")
+
+  @@map("book_pages")
+}
+
+// ── Comercial: entitlements, pagamentos, catálogo ──────────────────────
+
+model Entitlement {
+  id         String    @id @default(cuid())
+  userId     String?
+  buyerEmail String
+  offerId    String
+  productKey String // book_pdf | book_app | federal_addon
+  paymentId  String    @unique
+  status     String // pending | active | revoked
+  grantedAt  DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([buyerEmail, productKey, status])
+  @@map("entitlements")
+}
+
+model PaymentEvent {
+  providerEventId String   @id
+  provider        String   @default("cakto")
+  paymentId       String?
+  payloadHash     String
+  eventType       String
+  result          String?
+  simulated       Boolean  @default(false)
+  processedAt     DateTime @default(now())
+
+  @@map("payment_events")
+}
+
+model CatalogItem {
+  id             String   @id @default(cuid())
+  value          String
+  valueKind      String // centena | milhar
+  sourceName     String
+  methodology    String
+  referencePeriod String?
+  reviewStatus   String   @default("draft")
+  version        Int      @default(1)
+  createdAt      DateTime @default(now())
+
+  @@index([reviewStatus])
+  @@map("catalog_items")
+}
+
+// ── Usuário: salvos, telemetria mínima ─────────────────────────────────
+
+model SavedEntry {
+  userId  String
+  entryId String
+  user    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  entry   DreamEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  savedAt DateTime   @default(now())
+
+  @@id([userId, entryId])
+  @@map("saved_entries")
+}
+
+// Telemetria mínima: NÃO guarda o texto do sonho (apenas contagens e hash).
+model SearchLog {
+  id           String   @id @default(cuid())
+  mode         String // termo | relato
+  queryHash    String
+  elementCount Int      @default(0)
+  resultCount  Int      @default(0)
+  durationMs   Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@map("search_logs")
+}
