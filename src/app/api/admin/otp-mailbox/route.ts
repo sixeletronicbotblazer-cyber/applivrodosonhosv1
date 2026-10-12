@@ -7,8 +7,8 @@ import { config } from '@/lib/config'
 // GET /api/admin/otp-mailbox — caixa de saída do transporte dev.
 // Existe APENAS em modo de desenvolvimento isolado (SMTP não configurado).
 // Com SMTP ativo, nenhum código é armazenado em texto puro nem exibido aqui.
-export async function GET() {
-  const admin = await requireAdmin()
+export async function GET(req: Request) {
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   if (!config.demoMode || config.smtpConfigured) {

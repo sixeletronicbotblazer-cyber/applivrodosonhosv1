@@ -106,11 +106,51 @@ export class ApiError extends Error {
   }
 }
 
+// ── Sessão no cliente ─────────────────────────────────────────────────
+// O cookie httpOnly continua sendo o caminho principal. O token também é
+// guardado aqui e enviado como `Authorization: Bearer` — necessário em
+// contextos onde o navegador descarta cookies (prévia incorporada em iframe
+// cross-site), que era exatamente o caso do login que não avançava.
+const SESSION_TOKEN_KEY = 'lds_session_token'
+
+function readStoredToken(): string | null {
+  try {
+    return window.localStorage.getItem(SESSION_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function saveSessionToken(token: string): void {
+  try {
+    window.localStorage.setItem(SESSION_TOKEN_KEY, token)
+  } catch {
+    // sem localStorage (modo privado etc.): segue só com cookie
+  }
+}
+
+export function clearSessionToken(): void {
+  try {
+    window.localStorage.removeItem(SESSION_TOKEN_KEY)
+  } catch {
+    // nada a fazer
+  }
+}
+
+/** Cabeçalhos de autenticação para chamadas feitas fora do cliente `api()`. */
+export function authHeaders(): Record<string, string> {
+  const token = readStoredToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = readStoredToken()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(init?.headers as Record<string, string> | undefined) }
+  if (token) headers.Authorization = `Bearer ${token}`
   const res = await fetch(path, {
     credentials: 'same-origin',
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers,
   })
   const text = await res.text()
   let data: unknown = null
@@ -121,6 +161,8 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const err = (data as { error?: { code?: string; message?: string } })?.error
+    // token inválido/expirado: limpa para não insistir no mesmo valor
+    if (res.status === 401 && token) clearSessionToken()
     throw new ApiError(err?.code ?? 'server_error', err?.message ?? 'Erro inesperado. Tente novamente.', res.status, data as Record<string, unknown>)
   }
   return data as T

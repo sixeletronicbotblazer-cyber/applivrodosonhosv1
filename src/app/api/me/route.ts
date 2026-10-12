@@ -4,8 +4,8 @@ import { getActiveEntitlements } from '@/lib/entitlements'
 import { config } from '@/lib/config'
 
 // GET /api/me — sessão atual + entitlements + flags de módulo.
-export async function GET() {
-  const auth = await getAuth()
+export async function GET(req: Request) {
+  const auth = await getAuth(req)
   if (!auth) return NextResponse.json({ user: null })
 
   const entitlements = await getActiveEntitlements(auth.email)

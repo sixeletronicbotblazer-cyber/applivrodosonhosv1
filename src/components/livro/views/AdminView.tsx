@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Image from 'next/image'
-import { api, ApiError } from '@/lib/app-client'
+import { api, ApiError, authHeaders } from '@/lib/app-client'
 import { useApp } from '@/lib/app-store'
 import { PageHeader } from '@/components/livro/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -678,7 +678,7 @@ function CatalogTab() {
     setBusy(true)
     setResult(null)
     try {
-      const res = await fetch('/api/admin/catalog', { method: 'POST', body: payload, headers: { 'Content-Type': 'text/plain' } })
+      const res = await fetch('/api/admin/catalog', { method: 'POST', body: payload, headers: { 'Content-Type': 'text/plain', ...authHeaders() } })
       const data = (await res.json()) as { imported?: number; rejected?: number; errors?: string[]; error?: { message: string } }
       if (!res.ok) {
         setResult(data.error?.message ?? 'Falha na importação.')

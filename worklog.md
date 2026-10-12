@@ -77,3 +77,26 @@ Stage Summary:
 - Capturas: download/nova-tela-acesso-celular.png (390px), nova-tela-acesso-celular-320.png, nova-tela-acesso-desktop.png (1440px)
 - Pendência documentada (não na tela): CAKTO_* reais para acesso pago em produção; SMTP opcional para OTP alternativo
 - Dados de teste criados em demo: usuário cliente@teste.com.br com entitlement demo book_app (idempotente, esperado em DEMO_MODE)
+
+---
+Task ID: 3
+Agent: Z.ai Code (orquestrador)
+Task: Correção do login — "digito e-mail, clico em Acessar aplicativo e continuo na mesma tela"
+
+Work Log:
+- Diagnóstico: servidor OK (POST /api/auth/access 200 + GET /api/me 200 no dev.log, repetido em cada clique). Causa raiz no CLIENTE: o Preview Panel roda o app em iframe cross-site; cookie de sessão SameSite=Lax (src/lib/auth.ts createSession) é descartado pelo navegador nesse contexto → /api/me volta {user:null} → guard de page.tsx força <EntrarView/> de volta. Por isso o clique não levava a lugar nenhum.
+- auth.ts reescrito na parte de sessão: createSession agora retorna o token; getAuth(req) aceita Authorization: Bearer (sessão no banco) com fallback para cookie; destroyCurrentSession(req) idem; requireAdmin(req) repassa; cookie passa a SameSite=None; Secure quando a requisição é HTTPS (x-forwarded-proto) — funciona dentro do iframe https; verifyOtp usa createSession e devolve token.
+- Rotas atualizadas para autenticação consciente de requisição (Bearer OU cookie): me, animals, index, book/pages, saved (GET/POST/DELETE), account/delete, search, entries, tools/generate e todas as admin (requireAdmin(req)).
+- /api/auth/access devolve token no corpo; /api/auth/verify-otp idem; /api/auth/logout aceita Bearer.
+- app-client.ts: saveSessionToken/clearSessionToken/authHeaders; api() anexa Bearer automaticamente e limpa token em 401.
+- app-store.ts: refreshMe limpa token obsoleto quando user null; logout limpa token e não quebra se o servidor falhar.
+- EntrarView: guarda o token da resposta, confirma a sessão (me.user) antes de navegar e mostra mensagem clara se falhar; form noValidate para o erro de e-mail inválido aparecer abaixo do campo (não na bolha nativa); botão sempre reabilitado no finally.
+- AdminView: fetch cru do catálogo agora envia authHeaders() (Bearer).
+- Warning next/image da capa corrigido (props/estilo com dimensões fixas nos dois eixos — capa real 700×990).
+
+Stage Summary:
+- curl sem cookies (contexto iframe): access→token→me→search→logout→me=null, tudo OK; regressão com cookie (top-level) OK.
+- Browser real (Agent Browser), estado zerado: e-mail inválido → erro abaixo do campo; cliente@teste.com.br → #/inicio imediato; verbete CAVALO completo; Livro (3 páginas + zoom); Ferramentas + tabela dos bichos; reload → continua logado; Sair → #/entrar com token limpo; segundo ciclo completo idem.
+- Console sem erros/warnings; lint limpo; dev.log sem erros; sem rolagem horizontal em 390px; botão de acesso visível (top 440px em 844px).
+- Produção preservada: sem DEMO_MODE o /api/auth/access continua exigindo Entitlement ativo (purchase_not_found); integração segura do comprador segue como pendência documentada no README.
+- App deixado logado em #/inicio no browser de teste; screenshots em download/entrar-mobile-390.png, entrar-desktop-1280.png, inicio-desktop-logado.png, inicio-mobile-390-logado.png.

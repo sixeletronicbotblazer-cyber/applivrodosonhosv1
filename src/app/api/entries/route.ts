@@ -8,7 +8,7 @@ import { normalizeText } from '@/lib/normalize'
 // GET /api/entries?slug=… — detalhe do verbete publicado (pacote completo).
 // Conteúdo editorial traz o bloco de associação atribuído ao verbete-base, nunca como número próprio.
 export async function GET(req: Request) {
-  const auth = await getAuth()
+  const auth = await getAuth(req)
   if (!auth) return apiError('auth_required', 'Entre com seu e-mail para consultar.', 401)
   if (!(await hasAppAccess(auth.email))) {
     return apiError('upgrade_required', 'Os verbetes fazem parte do pacote Livro + Aplicativo.', 403, { product: 'book_app' })

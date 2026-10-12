@@ -89,7 +89,7 @@ export function InicioView() {
               onClick={() => navigate('livro')}
               className="focus-ring mt-4 flex w-full items-center gap-4 rounded-2xl border border-linha bg-[#F8F0DC] px-4 py-4 text-left transition-colors hover:bg-[#F4EAD0]"
             >
-              <Image src="/book/capa.jpg" alt="Capa do Livro dos Sonhos" width={48} height={68} className="rounded-md object-cover shadow-sm" />
+              <Image src="/book/capa.jpg" alt="Capa do Livro dos Sonhos" width={48} height={68} className="rounded-md object-cover shadow-sm" style={{ width: 48, height: 68 }} />
               <span>
                 <span className="block font-display text-lg font-bold text-tinta">Seu livro também está aqui</span>
                 <span className="mt-0.5 block text-sm font-medium text-roxo-2">Abrir o PDF original →</span>

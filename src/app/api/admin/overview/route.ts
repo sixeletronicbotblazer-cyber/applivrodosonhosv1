@@ -5,8 +5,8 @@ import { db } from '@/lib/db'
 import { config } from '@/lib/config'
 
 // GET /api/admin/overview — números da curadoria e integrações.
-export async function GET() {
-  const admin = await requireAdmin()
+export async function GET(req: Request) {
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   const [totalEntries, published, pdfLiteral, editorial, draft, aliasesDraft, aliasesActive, savedCount, searchCount] =

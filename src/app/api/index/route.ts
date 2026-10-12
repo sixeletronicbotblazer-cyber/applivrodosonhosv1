@@ -5,8 +5,8 @@ import { apiError } from '@/lib/api-helpers'
 import { db } from '@/lib/db'
 
 // GET /api/index — índice A–Z dos verbetes publicados (pacote completo).
-export async function GET() {
-  const auth = await getAuth()
+export async function GET(req: Request) {
+  const auth = await getAuth(req)
   if (!auth) return apiError('auth_required', 'Entre com seu e-mail para consultar.', 401)
   if (!(await hasAppAccess(auth.email))) {
     return apiError('upgrade_required', 'O índice faz parte do pacote Livro + Aplicativo.', 403, { product: 'book_app' })

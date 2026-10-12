@@ -9,7 +9,7 @@
 import { useState } from 'react'
 import Image from 'next/image'
 import { Loader2 } from 'lucide-react'
-import { api, ApiError } from '@/lib/app-client'
+import { api, ApiError, saveSessionToken } from '@/lib/app-client'
 import { useApp } from '@/lib/app-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -36,8 +36,21 @@ export function EntrarView() {
     setError(null)
     setBusy(true)
     try {
-      await api('/api/auth/access', { method: 'POST', body: JSON.stringify({ email: value }) })
+      // 1) cria a sessão de demonstração (cookie + token de apoio para
+      //    contextos em que o navegador não guarda cookies, ex.: prévia incorporada)
+      const res = await api<{ token?: string }>('/api/auth/access', {
+        method: 'POST',
+        body: JSON.stringify({ email: value }),
+      })
+      if (res.token) saveSessionToken(res.token)
+
+      // 2) confirma a sessão antes de navegar — nunca deixa o botão sem resposta
       await refreshMe()
+      if (!useApp.getState().me?.user) {
+        throw new ApiError('session_failed', 'Não foi possível confirmar sua sessão. Tente novamente em instantes.', 500)
+      }
+
+      // 3) entra direto no início
       navigate('inicio')
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Não foi possível entrar agora. Tente novamente em instantes.')
@@ -74,6 +87,7 @@ export function EntrarView() {
                 width={64}
                 height={91}
                 className="rounded-lg shadow-md ring-1 ring-black/10"
+                style={{ width: 64, height: 91 }}
                 priority
               />
               <h1 className="font-display mt-4 text-[26px] font-bold leading-[1.15] text-tinta sm:text-[28px]">
@@ -85,6 +99,7 @@ export function EntrarView() {
             </div>
 
             <form
+              noValidate
               className="mt-6"
               onSubmit={(e) => {
                 e.preventDefault()

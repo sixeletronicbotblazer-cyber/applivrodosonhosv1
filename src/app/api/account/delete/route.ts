@@ -6,8 +6,8 @@ import { normalizeText } from '@/lib/normalize'
 
 // POST /api/account/delete — privacidade: apaga salvos, sessões e anonimiza a conta.
 // Entitlements de pagamento são preservados como registro financeiro, desvinculados do usuário.
-export async function POST() {
-  const auth = await getAuth()
+export async function POST(req: Request) {
+  const auth = await getAuth(req)
   if (!auth) return apiError('auth_required', 'Entre com seu e-mail.', 401)
 
   const anonEmail = `excluido+${normalizeText(auth.email).replace(/[^a-z0-9]/g, '')}-${Date.now().toString(36)}@anon.local`

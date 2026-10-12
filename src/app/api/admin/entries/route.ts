@@ -7,7 +7,7 @@ import { slugify } from '@/lib/normalize'
 
 // GET /api/admin/entries?status=&q=&source=&page= — lista de curadoria.
 export async function GET(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   const params = new URL(req.url).searchParams
@@ -61,7 +61,7 @@ export async function GET(req: Request) {
 
 // PATCH /api/admin/entries — editar verbete (curadoria) { id, title?, meaning?, association?…, reviewStatus? }
 export async function PATCH(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   const body = (await req.json().catch(() => ({}))) as {
@@ -122,7 +122,7 @@ export async function PATCH(req: Request) {
 
 // DELETE /api/admin/entries?id=… — remove apenas editoriais não publicados (literais são fonte histórica).
 export async function DELETE(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
   const id = new URL(req.url).searchParams.get('id')
   if (!id) return apiError('bad_request', 'Informe o id.', 400)

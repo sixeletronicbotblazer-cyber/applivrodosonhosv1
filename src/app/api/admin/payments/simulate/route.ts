@@ -7,7 +7,7 @@ import { processCaktoEvent, type CaktoEvent } from '@/lib/webhook-cakto'
 // com eventos simulados (teste local por eventos, como pedido na especificação).
 // Em produção, desativar via DEMO_MODE=false (a UI não exibe a simulação).
 export async function POST(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   const body = (await req.json().catch(() => ({}))) as {

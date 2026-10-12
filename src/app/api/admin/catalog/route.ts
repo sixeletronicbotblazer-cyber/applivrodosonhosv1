@@ -4,8 +4,8 @@ import { apiError } from '@/lib/api-helpers'
 import { db } from '@/lib/db'
 
 // GET /api/admin/catalog — lista itens importados (valores visíveis apenas à administração).
-export async function GET() {
-  const admin = await requireAdmin()
+export async function GET(req: Request) {
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
   const rows = await db.catalogItem.findMany({ orderBy: { createdAt: 'desc' }, take: 100 })
   return NextResponse.json({
@@ -19,7 +19,7 @@ export async function GET() {
 // Formato CSV (cabeçalho): value,value_kind,source_name,methodology,reference_period
 // Nada é publicado automaticamente: itens entram como draft e exigem revisão + origem verificada.
 export async function POST(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   const body = (await req.text())
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
 
 // DELETE /api/admin/catalog?id=… — remove item importado.
 export async function DELETE(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
   const id = new URL(req.url).searchParams.get('id')
   if (!id) return apiError('bad_request', 'Informe o id.', 400)

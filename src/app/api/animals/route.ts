@@ -6,8 +6,8 @@ import { db } from '@/lib/db'
 
 // GET /api/animals — tabela dos 25 bichos/grupos/dezenas.
 // Status de verificação acompanha cada linha (regra: nunca apresentar dado derivado como conferido).
-export async function GET() {
-  const auth = await getAuth()
+export async function GET(req: Request) {
+  const auth = await getAuth(req)
   if (!auth) return apiError('auth_required', 'Entre com seu e-mail para consultar.', 401)
   if (!(await hasAppAccess(auth.email))) {
     return apiError('upgrade_required', 'A tabela dos bichos faz parte do pacote Livro + Aplicativo.', 403, { product: 'book_app' })

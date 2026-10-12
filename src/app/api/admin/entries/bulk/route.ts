@@ -7,7 +7,7 @@ import { invalidateSearchIndex } from '@/lib/search'
 // POST /api/admin/entries/bulk — publicar/devolver em lote { ids: string[], action: 'publish'|'unpublish' }
 // Regra: editorial sem vínculo e literal sem página nunca são publicados (falha detalhada por id).
 export async function POST(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   const body = (await req.json().catch(() => ({}))) as { ids?: string[]; action?: 'publish' | 'unpublish' }

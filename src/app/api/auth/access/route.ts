@@ -74,9 +74,13 @@ export async function POST(req: Request) {
     user = await db.user.create({ data: { email, role: 'USER' } })
   }
 
-  await createSession(user, ip)
+  const token = await createSession(user, ip)
 
   return NextResponse.json({
+    // token também no corpo: fallback Bearer para contextos onde o cookie de
+    // sessão não circula (prévia incorporada em iframe cross-site). Em
+    // produção com cookie o valor é o mesmo do cookie httpOnly.
+    token,
     user: { email: user.email, role: user.role },
     entitlements: entitlements.map((e) => ({ productKey: e.productKey, status: e.status, grantedAt: e.grantedAt })),
   })

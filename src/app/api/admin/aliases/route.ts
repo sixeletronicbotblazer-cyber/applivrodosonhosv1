@@ -7,7 +7,7 @@ import { normalizeText } from '@/lib/normalize'
 
 // GET /api/admin/aliases?status=&page= — aliases (variações contextuais) para revisão.
 export async function GET(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   const params = new URL(req.url).searchParams
@@ -55,7 +55,7 @@ export async function GET(req: Request) {
 
 // PATCH /api/admin/aliases { id, status: 'active'|'draft' } — ativar alias revisado.
 export async function PATCH(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
 
   const body = (await req.json().catch(() => ({}))) as { id?: number; status?: string }
@@ -78,7 +78,7 @@ export async function PATCH(req: Request) {
 
 // POST /api/admin/aliases — criar alias manual { entryId, alias }
 export async function POST(req: Request) {
-  const admin = await requireAdmin()
+  const admin = await requireAdmin(req)
   if (!admin) return apiError('forbidden', 'Acesso restrito à administração.', 403)
   const body = (await req.json().catch(() => ({}))) as { entryId?: string; alias?: string }
   if (!body.entryId || !body.alias?.trim()) return apiError('bad_request', 'Informe verbete e alias.', 400)

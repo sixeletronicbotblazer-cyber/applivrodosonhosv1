@@ -27,7 +27,7 @@ function hashSeed(s: string): number {
 }
 
 export async function POST(req: Request) {
-  const auth = await getAuth()
+  const auth = await getAuth(req)
   if (!auth) return apiError('auth_required', 'Entre com seu e-mail.', 401)
   if (!(await hasAppAccess(auth.email))) {
     return apiError('upgrade_required', 'O gerador faz parte do pacote Livro + Aplicativo.', 403, { product: 'book_app' })

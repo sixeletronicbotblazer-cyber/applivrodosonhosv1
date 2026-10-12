@@ -4,7 +4,7 @@
 // Hash routing: #/inicio, #/buscar, #/verbete/cavalo, #/livro?pagina=46 …
 
 import { create } from 'zustand'
-import { api, type Me, type AppConfig } from '@/lib/app-client'
+import { api, clearSessionToken, type Me, type AppConfig } from '@/lib/app-client'
 
 export type ViewName = 'entrar' | 'inicio' | 'buscar' | 'verbete' | 'livro' | 'ferramentas' | 'salvos' | 'conta' | 'admin'
 
@@ -82,11 +82,13 @@ export const useApp = create<AppState>((set, get) => ({
       const me = await api<Me>('/api/me')
       set({ me, meLoading: false })
       // sem sessão → tela de acesso (exceto se já estiver nela)
-      if (!me.user && get().route.view !== 'entrar') {
-        get().navigate('entrar')
+      if (!me.user) {
+        clearSessionToken()
+        if (get().route.view !== 'entrar') get().navigate('entrar')
       }
     } catch {
       set({ me: { user: null }, meLoading: false })
+      clearSessionToken()
       if (get().route.view !== 'entrar') get().navigate('entrar')
     }
   },
@@ -101,7 +103,12 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   logout: async () => {
-    await api('/api/auth/logout', { method: 'POST' })
+    try {
+      await api('/api/auth/logout', { method: 'POST' })
+    } catch {
+      // sair é local-first: mesmo sem resposta do servidor, limpa o cliente
+    }
+    clearSessionToken()
     set({ me: { user: null } })
     get().navigate('entrar')
   },

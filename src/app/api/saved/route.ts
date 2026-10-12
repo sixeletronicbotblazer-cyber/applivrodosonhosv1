@@ -5,8 +5,8 @@ import { apiError } from '@/lib/api-helpers'
 import { db } from '@/lib/db'
 
 // GET /api/saved — verbetes salvos do usuário.
-export async function GET() {
-  const auth = await getAuth()
+export async function GET(req: Request) {
+  const auth = await getAuth(req)
   if (!auth) return apiError('auth_required', 'Entre com seu e-mail.', 401)
   if (!(await hasAppAccess(auth.email))) return apiError('upgrade_required', 'Recurso do pacote Livro + Aplicativo.', 403)
 
@@ -31,7 +31,7 @@ export async function GET() {
 
 // POST /api/saved — salva verbete { slug }
 export async function POST(req: Request) {
-  const auth = await getAuth()
+  const auth = await getAuth(req)
   if (!auth) return apiError('auth_required', 'Entre com seu e-mail.', 401)
   if (!(await hasAppAccess(auth.email))) return apiError('upgrade_required', 'Recurso do pacote Livro + Aplicativo.', 403)
 
@@ -50,7 +50,7 @@ export async function POST(req: Request) {
 
 // DELETE /api/saved?slug=… (um) ou ?all=1 (todos) — apagar é sempre permitido ao dono.
 export async function DELETE(req: Request) {
-  const auth = await getAuth()
+  const auth = await getAuth(req)
   if (!auth) return apiError('auth_required', 'Entre com seu e-mail.', 401)
   const params = new URL(req.url).searchParams
   if (params.get('all') === '1') {

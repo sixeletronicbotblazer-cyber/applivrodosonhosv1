@@ -5,7 +5,7 @@
 import { db } from '@/lib/db'
 import { config } from '@/lib/config'
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'crypto'
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 
 export const SESSION_COOKIE = 'lds_session'
 
@@ -58,7 +58,7 @@ export async function requestOtp(rawEmail: string, ip: string): Promise<RequestO
 }
 
 export type VerifyOtpResult =
-  | { ok: true; userId: string; email: string; role: string; isNew: boolean }
+  | { ok: true; userId: string; email: string; role: string; isNew: boolean; token: string }
   | { ok: false; reason: 'invalid' | 'expired' | 'too_many_attempts' | 'not_found' }
 
 export async function verifyOtp(rawEmail: string, code: string, ip: string): Promise<VerifyOtpResult> {
@@ -92,38 +92,57 @@ export async function verifyOtp(rawEmail: string, code: string, ip: string): Pro
     create: { email, role: 'USER' },
   })
 
-  const token = randomBytes(32).toString('hex')
-  await db.session.create({
-    data: {
-      token,
-      userId: user.id,
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
-      ip,
-      userAgent: undefined,
-    },
-  })
-  const jar = await cookies()
-  jar.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production' && process.env.FORCE_INSECURE_COOKIE !== 'true',
-    maxAge: 30 * 24 * 60 * 60,
-    path: '/',
-  })
+  const token = await createSession(user, ip)
 
-  return { ok: true, userId: user.id, email: user.email, role: user.role, isNew: true }
+  return { ok: true, userId: user.id, email: user.email, role: user.role, isNew: true, token }
 }
 
-export async function destroyCurrentSession(): Promise<void> {
+/** Encerra a sessão atual. Com requisição, aceita também o token Bearer
+ *  (mesma sessão do cliente, mesmo quando o cookie não circula). */
+export async function destroyCurrentSession(req?: Request): Promise<void> {
   const jar = await cookies()
-  const token = jar.get(SESSION_COOKIE)?.value
+  let token = jar.get(SESSION_COOKIE)?.value
+  const bearer = bearerToken(req)
+  if (bearer) token = bearer
   if (token) await db.session.deleteMany({ where: { token } })
   jar.delete(SESSION_COOKIE)
 }
 
-/** Cria uma sessão persistente (30 dias) para o usuário e grava o cookie httpOnly.
+/** Detecta HTTPS atrás do gateway (x-forwarded-proto) para poder emitir o
+ *  cookie com SameSite=None; Secure — necessário quando o app roda incorporado
+ *  em iframe cross-site (painel de prévia), onde SameSite=Lax é descartado. */
+async function requestIsHttps(): Promise<boolean> {
+  try {
+    const h = await headers()
+    const proto = h.get('x-forwarded-proto') ?? ''
+    return proto.split(',')[0].trim() === 'https'
+  } catch {
+    return false
+  }
+}
+
+async function sessionCookieOptions(): Promise<{
+  httpOnly: true
+  sameSite: 'none' | 'lax'
+  secure: boolean
+  maxAge: number
+  path: string
+}> {
+  const https = await requestIsHttps()
+  return {
+    httpOnly: true,
+    sameSite: https ? 'none' : 'lax',
+    secure: https,
+    maxAge: 30 * 24 * 60 * 60,
+    path: '/',
+  }
+}
+
+/** Cria uma sessão persistente (30 dias) para o usuário, grava o cookie httpOnly
+ *  e devolve o token (o cliente guarda como fallback Bearer para contextos em
+ *  que cookies não circulam, ex.: iframe cross-site do painel de prévia).
  *  Usada pelo acesso por e-mail (vínculo de compra / sessão de demonstração). */
-export async function createSession(user: { id: string }, ip: string): Promise<void> {
+export async function createSession(user: { id: string }, ip: string): Promise<string> {
   const token = randomBytes(32).toString('hex')
   await db.session.create({
     data: {
@@ -134,31 +153,50 @@ export async function createSession(user: { id: string }, ip: string): Promise<v
     },
   })
   const jar = await cookies()
-  jar.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production' && process.env.FORCE_INSECURE_COOKIE !== 'true',
-    maxAge: 30 * 24 * 60 * 60,
-    path: '/',
-  })
+  jar.set(SESSION_COOKIE, token, await sessionCookieOptions())
+  return token
 }
 
-export type AuthContext = { userId: string; email: string; role: string }
+function bearerToken(req?: Request): string | null {
+  const header = req?.headers.get('authorization')
+  if (!header) return null
+  const [scheme, value] = header.split(' ')
+  if (!scheme || scheme.toLowerCase() !== 'bearer' || !value) return null
+  const token = value.trim()
+  return token.length > 0 ? token : null
+}
 
-export async function getAuth(): Promise<AuthContext | null> {
-  const jar = await cookies()
-  const token = jar.get(SESSION_COOKIE)?.value
-  if (!token) return null
+async function authFromToken(token: string): Promise<AuthContext | null> {
   const session = await db.session.findUnique({ where: { token }, include: { user: true } })
   if (!session || session.expiresAt.getTime() < Date.now()) return null
   return { userId: session.user.id, email: session.user.email, role: session.user.role }
 }
 
-export async function requireAdmin(): Promise<AuthContext | null> {
-  const auth = await getAuth()
+/** Autenticação consciente da requisição: aceita `Authorization: Bearer`
+ *  (sessão criada por /api/auth/access e guardada pelo cliente) e mantém o
+ *  cookie httpOnly como caminho padrão. Isso corrige o login no modo de
+ *  prévia incorporada, onde o navegador descarta cookies SameSite=Lax. */
+export async function getAuth(req?: Request): Promise<AuthContext | null> {
+  if (req) {
+    const bearer = bearerToken(req)
+    if (bearer) {
+      const viaBearer = await authFromToken(bearer)
+      if (viaBearer) return viaBearer
+    }
+  }
+  const jar = await cookies()
+  const token = jar.get(SESSION_COOKIE)?.value
+  if (!token) return null
+  return authFromToken(token)
+}
+
+export async function requireAdmin(req?: Request): Promise<AuthContext | null> {
+  const auth = await getAuth(req)
   if (!auth || auth.role !== 'ADMIN') return null
   return auth
 }
+
+export type AuthContext = { userId: string; email: string; role: string }
 
 // wrapper local para não circular-importar rate-limit aqui
 import { rateLimit as rateLimitCheck } from '@/lib/rate-limit'
