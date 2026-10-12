@@ -12,7 +12,7 @@ export async function GET() {
   const productKeys = new Set(entitlements.map((e) => e.productKey))
   return NextResponse.json({
     user: { email: auth.email, role: auth.role },
-    entitlements: entitlements.map((e) => ({ productKey: e.productKey, status: e.status, offerId: e.offerId, grantedAt: e.grantedAt })),
+    entitlements: entitlements.map((e) => ({ productKey: e.productKey, status: e.status, offerId: e.offerId, paymentId: e.paymentId, grantedAt: e.grantedAt })),
     access: {
       app: productKeys.has('book_app'),
       pdf: productKeys.has('book_pdf') || productKeys.has('book_app'),

@@ -9,6 +9,7 @@
 //  · Caixa OTP dev (somente modo de desenvolvimento sem SMTP)
 
 import { useCallback, useEffect, useState } from 'react'
+import Image from 'next/image'
 import { api, ApiError } from '@/lib/app-client'
 import { useApp } from '@/lib/app-store'
 import { PageHeader } from '@/components/livro/PageHeader'
@@ -468,7 +469,7 @@ function EditDialog({
           <div>
             <p className="text-xs font-bold uppercase tracking-wide text-roxo">Página original (conferência)</p>
             {pageImage ? (
-              <img src={pageImage} alt={`Página ${entry.pdfPage} do PDF original`} className="mt-1.5 w-full rounded-xl border border-linha" />
+              <Image src={pageImage} alt={`Página ${entry.pdfPage} do PDF original`} width={774} height={1095} className="mt-1.5 h-auto w-full rounded-xl border border-linha" unoptimized />
             ) : (
               <div className="mt-1.5 rounded-xl border border-dashed border-linha bg-white px-4 py-8 text-center text-sm text-muted-foreground">
                 Imagem da página {entry.pdfPage ?? '—'} não anexada neste ambiente.

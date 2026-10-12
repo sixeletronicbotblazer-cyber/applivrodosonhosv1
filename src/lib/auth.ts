@@ -121,6 +121,28 @@ export async function destroyCurrentSession(): Promise<void> {
   jar.delete(SESSION_COOKIE)
 }
 
+/** Cria uma sessão persistente (30 dias) para o usuário e grava o cookie httpOnly.
+ *  Usada pelo acesso por e-mail (vínculo de compra / sessão de demonstração). */
+export async function createSession(user: { id: string }, ip: string): Promise<void> {
+  const token = randomBytes(32).toString('hex')
+  await db.session.create({
+    data: {
+      token,
+      userId: user.id,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      ip,
+    },
+  })
+  const jar = await cookies()
+  jar.set(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production' && process.env.FORCE_INSECURE_COOKIE !== 'true',
+    maxAge: 30 * 24 * 60 * 60,
+    path: '/',
+  })
+}
+
 export type AuthContext = { userId: string; email: string; role: string }
 
 export async function getAuth(): Promise<AuthContext | null> {

@@ -1,0 +1,761 @@
+     1→'use client'
+     2→
+     3→// Admin — curadoria dos 1.076 registros de trabalho:
+     4→//  · Revisão lado a lado com a página do PDF (quando a imagem existe)
+     5→//  · Correção de título/interpretação/números, publicar individual ou em lote
+     6→//  · Aliases (variações contextuais) para ativar após revisão
+     7→//  · Pagamentos: simulação de eventos (mesmo pipeline do webhook) + log idempotente
+     8→//  · Catálogo: importação auditável (JSON/CSV) com origem e critério obrigatórios
+     9→//  · Caixa OTP dev (somente modo de desenvolvimento sem SMTP)
+    10→
+    11→import { useCallback, useEffect, useState } from 'react'
+    12→import { api, ApiError } from '@/lib/app-client'
+    13→import { useApp } from '@/lib/app-store'
+    14→import { PageHeader } from '@/components/livro/PageHeader'
+    15→import { Button } from '@/components/ui/button'
+    16→import { Input } from '@/components/ui/input'
+    17→import { Textarea } from '@/components/ui/textarea'
+    18→import { Skeleton } from '@/components/ui/skeleton'
+    19→import { toast } from '@/hooks/use-toast'
+    20→
+    21→type Overview = {
+    22→  counts: { totalEntries: number; published: number; pdfLiteral: number; editorial: number; draft: number; aliasesDraft: number; aliasesActive: number; workRecordsTotal: number; searchCount: number }
+    23→  publishedBreakdown: { pdfLiteral: number; editorial: number }
+    24→  integrations: { smtpConfigured: boolean; webhookSecretConfigured: boolean; offersConfigured: Record<string, boolean>; federalFeedConfigured: boolean; demoMode: boolean }
+    25→  recentPayments: { eventId: string; eventType: string; paymentId: string | null; result: string | null; simulated: boolean; processedAt: string }[]
+    26→  entitlements: { id: string; buyerEmail: string; productKey: string; status: string; paymentId: string; grantedAt: string | null; revokedAt: string | null }[]
+    27→}
+    28→
+    29→type AdminEntry = {
+    30→  id: string
+    31→  slug: string
+    32→  title: string
+    33→  sourceType: 'pdf_literal' | 'editorial'
+    34→  kind: string | null
+    35→  reviewStatus: string
+    36→  pdfPage: number | null
+    37→  printPage: number | null
+    38→  meaning: string | null
+    39→  reviewerNote: string | null
+    40→  sourceNotes: string | null
+    41→  association: { animal: string; group: number | null; dezena: string | null; centena: string | null; milhar: string | null; loto: string | null; evidencePdfPage: number } | null
+    42→  relatedBase: { id: string; title: string; reviewStatus: string; association: { animal: string; group: number | null; dezena: string | null; centena: string | null; milhar: string | null } | null } | null
+    43→}
+    44→
+    45→type Tab = 'overview' | 'review' | 'aliases' | 'payments' | 'catalog' | 'otp'
+    46→
+    47→export function AdminView() {
+    48→  const { me } = useApp()
+    49→  const [tab, setTab] = useState<Tab>('overview')
+    50→
+    51→  if (!me?.user) return null
+    52→  if (me.user.role !== 'ADMIN') {
+    53→    return (
+    54→      <div>
+    55→        <PageHeader title="Administração" subtitle="Acesso restrito" />
+    56→        <div className="mx-auto max-w-3xl px-5 py-10">
+    57→          <div className="rounded-2xl border border-linha bg-white p-8 text-center">
+    58→            <p className="font-display text-xl font-bold text-tinta">Painel protegido por papel administrativo.</p>
+    59→            <p className="mt-2 text-sm text-muted-foreground">Sua conta ({me.user.email}) não possui o papel ADMIN.</p>
+    60→          </div>
+    61→        </div>
+    62→      </div>
+    63→    )
+    64→  }
+    65→
+    66→  return (
+    67→    <div>
+    68→      <PageHeader title="Administração" subtitle="Curadoria, pagamentos e integrações" />
+    69→      <div className="mx-auto w-full max-w-3xl px-5 py-6 md:px-8">
+    70→        <div className="nice-scroll flex gap-2 overflow-x-auto pb-1" role="tablist" aria-label="Seções administrativas">
+    71→          {(
+    72→            [
+    73→              ['overview', 'Visão geral'],
+    74→              ['review', 'Revisão de verbetes'],
+    75→              ['aliases', 'Aliases'],
+    76→              ['payments', 'Pagamentos'],
+    77→              ['catalog', 'Catálogo'],
+    78→              ['otp', 'OTP (dev)'],
+    79→            ] as [Tab, string][]
+    80→          ).map(([t, label]) => (
+    81→            <button
+    82→              key={t}
+    83→              type="button"
+    84→              role="tab"
+    85→              aria-selected={tab === t}
+    86→              onClick={() => setTab(t)}
+    87→              className={`focus-ring h-10 shrink-0 rounded-full px-4 text-sm font-bold transition-colors ${
+    88→                tab === t ? 'bg-roxo text-white' : 'bg-lilas text-roxo-2 hover:bg-[#E8DBF2]'
+    89→              }`}
+    90→            >
+    91→              {label}
+    92→            </button>
+    93→          ))}
+    94→        </div>
+    95→
+    96→        <div className="mt-6">
+    97→          {tab === 'overview' ? <OverviewTab /> : tab === 'review' ? <ReviewTab /> : tab === 'aliases' ? <AliasesTab /> : tab === 'payments' ? <PaymentsTab /> : tab === 'catalog' ? <CatalogTab /> : <OtpTab />}
+    98→        </div>
+    99→      </div>
+   100→    </div>
+   101→  )
+   102→}
+   103→
+   104→// ── Visão geral ─────────────────────────────────────────────────────────
+   105→
+   106→function OverviewTab() {
+   107→  const [data, setData] = useState<Overview | null>(null)
+   108→  const [error, setError] = useState<string | null>(null)
+   109→
+   110→  useEffect(() => {
+   111→    api<Overview>('/api/admin/overview')
+   112→      .then(setData)
+   113→      .catch((e) => setError(e instanceof ApiError ? e.message : 'Erro ao carregar visão geral.'))
+   114→  }, [])
+   115→
+   116→  if (error) return <EmptyBox text={error} />
+   117→  if (!data) return <Skeleton className="h-72 w-full rounded-2xl bg-lilas/50" />
+   118→
+   119→  const c = data.counts
+   120→  return (
+   121→    <div className="space-y-4">
+   122→      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+   123→        <StatCard label="Registros de trabalho" value={c.workRecordsTotal} hint={`${c.totalEntries} verbetes + ${c.aliasesDraft + c.aliasesActive} aliases`} />
+   124→        <StatCard label="Publicados" value={c.published} hint={`${data.publishedBreakdown.pdfLiteral} do PDF · ${data.publishedBreakdown.editorial} editoriais`} gold />
+   125→        <StatCard label="Em curadoria (draft)" value={c.draft} hint="aguardando conferência com a página" />
+   126→        <StatCard label="Aliases (draft)" value={c.aliasesDraft} hint={`${c.aliasesActive} ativos`} />
+   127→      </div>
+   128→
+   129→      <div className="rounded-2xl border border-linha bg-white p-5">
+   130→        <h3 className="font-display text-lg font-bold text-tinta">Cobertura</h3>
+   131→        <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+   132→          Verbetes literais do PDF: <strong className="text-tinta">{data.publishedBreakdown.pdfLiteral}</strong> publicados de{' '}
+   133→          <strong className="text-tinta">{c.pdfLiteral}</strong> extraídos. Meta operacional "2×" ={' '}
+   134→          <strong className="text-tinta">{c.pdfLiteral * 2}</strong> registros de trabalho (contagem de importação, não de verbetes
+   135→          literais validados).
+   136→        </p>
+   137→        <p className="mt-2 text-xs text-muted-foreground">Buscas registradas (telemetria mínima, sem texto): {c.searchCount}</p>
+   138→      </div>
+   139→
+   140→      <div className="rounded-2xl border border-linha bg-white p-5">
+   141→        <h3 className="font-display text-lg font-bold text-tinta">Integrações</h3>
+   142→        <ul className="mt-2 space-y-2 text-sm">
+   143→          <IntegrationRow ok={data.integrations.smtpConfigured} label="E-mail SMTP (OTP real)" missingNote="não configurado — modo dev: código visível na caixa OTP (aba ao lado)" />
+   144→          <IntegrationRow ok={data.integrations.webhookSecretConfigured} label="Assinatura do webhook Cakto" missingNote="não configurada — eventos aceitos sem verificação (apenas dev)" />
+   145→          <IntegrationRow ok={Object.values(data.integrations.offersConfigured).some(Boolean)} label="IDs reais das ofertas (CAKTO_OFFER_*)" missingNote="nenhum ID configurado — concessões por offer_id serão recusadas" />
+   146→          <IntegrationRow ok={data.integrations.federalFeedConfigured} label="Fonte de dados da Federal" missingNote="módulo permanece bloqueado sem fonte autorizada" />
+   147→        </ul>
+   148→        {data.integrations.demoMode ? (
+   149→          <p className="mt-3 rounded-xl bg-[#F8F0DC] px-4 py-2.5 text-[13px] text-[#6B5313]">
+   150→            Modo de demonstração ativo (DEMO_MODE). Em produção configure DEMO_MODE=false + variáveis acima.
+   151→          </p>
+   152→        ) : null}
+   153→      </div>
+   154→
+   155→      <div className="rounded-2xl border border-linha bg-white p-5">
+   156→        <h3 className="font-display text-lg font-bold text-tinta">Últimos eventos de pagamento</h3>
+   157→        {data.recentPayments.length === 0 ? (
+   158→          <p className="mt-2 text-sm text-muted-foreground">Nenhum evento processado ainda.</p>
+   159→        ) : (
+   160→          <ul className="nice-scroll mt-3 max-h-64 space-y-2 overflow-y-auto">
+   161→            {data.recentPayments.map((p) => (
+   162→              <li key={p.eventId} className="rounded-xl bg-[#FBF9F4] px-4 py-2.5 text-[13px]">
+   163→                <span className="font-semibold text-tinta">{p.eventType}</span>
+   164→                {p.simulated ? <span className="ml-2 rounded bg-lilas px-1.5 py-0.5 text-[10px] font-bold uppercase text-roxo-2">simulado</span> : null}
+   165→                <span className="mt-0.5 block text-muted-foreground">{p.result}</span>
+   166→              </li>
+   167→            ))}
+   168→          </ul>
+   169→        )}
+   170→      </div>
+   171→    </div>
+   172→  )
+   173→}
+   174→
+   175→function StatCard({ label, value, hint, gold = false }: { label: string; value: number; hint?: string; gold?: boolean }) {
+   176→  return (
+   177→    <div className={`rounded-2xl border p-4 ${gold ? 'border-transparent bg-roxo text-white' : 'border-linha bg-white'}`}>
+   178→      <p className={`text-[11px] font-bold uppercase tracking-wide ${gold ? 'text-ouro' : 'text-muted-foreground'}`}>{label}</p>
+   179→      <p className={`font-display mt-1 text-3xl font-bold ${gold ? 'text-white' : 'text-roxo'}`}>{value}</p>
+   180→      {hint ? <p className={`mt-1 text-[11px] leading-snug ${gold ? 'text-[#D9C6EA]' : 'text-muted-foreground'}`}>{hint}</p> : null}
+   181→    </div>
+   182→  )
+   183→}
+   184→
+   185→function IntegrationRow({ ok, label, missingNote }: { ok: boolean; label: string; missingNote: string }) {
+   186→  return (
+   187→    <li className="flex items-start gap-2.5">
+   188→      <span className={`mt-0.5 inline-block h-2.5 w-2.5 shrink-0 rounded-full ${ok ? 'bg-verde' : 'bg-[#D9A13B]'}`} aria-hidden="true" />
+   189→      <span>
+   190→        <span className="font-semibold text-tinta">{label}:</span>{' '}
+   191→        <span className={ok ? 'text-verde' : 'text-muted-foreground'}>{ok ? 'configurado' : missingNote}</span>
+   192→      </span>
+   193→    </li>
+   194→  )
+   195→}
+   196→
+   197→// ── Revisão de verbetes ─────────────────────────────────────────────────
+   198→
+   199→function ReviewTab() {
+   200→  const [items, setItems] = useState<AdminEntry[] | null>(null)
+   201→  const [total, setTotal] = useState(0)
+   202→  const [page, setPage] = useState(1)
+   203→  const [status, setStatus] = useState<'all' | 'draft' | 'published'>('draft')
+   204→  const [source, setSource] = useState<'all' | 'pdf_literal' | 'editorial'>('all')
+   205→  const [q, setQ] = useState('')
+   206→  const [selected, setSelected] = useState<Set<string>>(new Set())
+   207→  const [editing, setEditing] = useState<AdminEntry | null>(null)
+   208→  const [pageImages, setPageImages] = useState<Map<number, string>>(new Map())
+   209→  const [busy, setBusy] = useState(false)
+   210→  const [reloadKey, setReloadKey] = useState(0)
+   211→  const reload = useCallback(() => setReloadKey((k) => k + 1), [])
+   212→
+   213→  useEffect(() => {
+   214→    let alive = true
+   215→    api<{ items: AdminEntry[]; total: number }>(`/api/admin/entries?status=${status}&source=${source}&q=${encodeURIComponent(q)}&page=${page}`)
+   216→      .then((res) => {
+   217→        if (!alive) return
+   218→        setItems(res.items)
+   219→        setTotal(res.total)
+   220→      })
+   221→      .catch(() => undefined)
+   222→    return () => {
+   223→      alive = false
+   224→    }
+   225→  }, [status, source, q, page, reloadKey])
+   226→
+   227→  useEffect(() => {
+   228→    api<{ pages: { pdfPage: number; imagePath: string | null }[] }>('/api/book/pages')
+   229→      .then((res) => {
+   230→        const m = new Map<number, string>()
+   231→        for (const p of res.pages) if (p.imagePath) m.set(p.pdfPage, p.imagePath)
+   232→        setPageImages(m)
+   233→      })
+   234→      .catch(() => undefined)
+   235→  }, [])
+   236→
+   237→  async function bulk(action: 'publish' | 'unpublish') {
+   238→    setBusy(true)
+   239→    try {
+   240→      const res = await api<{ published: number; failed: { id: string; reason: string }[] }>('/api/admin/entries/bulk', {
+   241→        method: 'POST',
+   242→        body: JSON.stringify({ ids: [...selected], action }),
+   243→      })
+   244→      toast({ title: `${res.published} verbetes processados`, description: res.failed.length ? `${res.failed.length} falharam (ver regra de publicação).` : undefined })
+   245→      setSelected(new Set())
+   246→      reload()
+   247→    } catch (e) {
+   248→      toast({ title: e instanceof ApiError ? e.message : 'Falha na operação' })
+   249→    } finally {
+   250→      setBusy(false)
+   251→    }
+   252→  }
+   253→
+   254→  const totalPages = Math.max(1, Math.ceil(total / 20))
+   255→
+   256→  return (
+   257→    <div>
+   258→      <div className="flex flex-wrap items-center gap-2">
+   259→        <select value={status} onChange={(e) => { setStatus(e.target.value as typeof status); setPage(1) }} aria-label="Filtrar por status" className="focus-ring h-10 rounded-xl border border-linha bg-white px-3 text-sm">
+   260→          <option value="draft">Em curadoria</option>
+   261→          <option value="published">Publicados</option>
+   262→          <option value="all">Todos</option>
+   263→        </select>
+   264→        <select value={source} onChange={(e) => { setSource(e.target.value as typeof source); setPage(1) }} aria-label="Filtrar por origem" className="focus-ring h-10 rounded-xl border border-linha bg-white px-3 text-sm">
+   265→          <option value="all">PDF + editoriais</option>
+   266→          <option value="pdf_literal">Só do PDF</option>
+   267→          <option value="editorial">Só editoriais</option>
+   268→        </select>
+   269→        <Input value={q} onChange={(e) => { setQ(e.target.value); setPage(1) }} placeholder="Buscar título…" aria-label="Buscar título" className="h-10 w-40 rounded-xl border-linha bg-white text-sm" />
+   270→        <span className="ml-auto text-xs text-muted-foreground">{total} verbetes</span>
+   271→      </div>
+   272→
+   273→      {selected.size > 0 ? (
+   274→        <div className="sticky top-2 z-10 mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-roxo px-4 py-2.5 text-white">
+   275→          <span className="text-sm font-semibold">{selected.size} selecionados</span>
+   276→          <Button onClick={() => void bulk('publish')} disabled={busy} className="focus-ring h-9 rounded-lg bg-ouro px-3 text-xs font-bold text-roxo hover:bg-[#EBBB3E]">
+   277→            Publicar selecionados
+   278→          </Button>
+   279→          <Button onClick={() => void bulk('unpublish')} disabled={busy} variant="outline" className="focus-ring h-9 rounded-lg border-white/30 bg-transparent px-3 text-xs font-bold text-white hover:bg-white/10">
+   280→            Devolver para draft
+   281→          </Button>
+   282→          <button type="button" onClick={() => setSelected(new Set())} className="focus-ring ml-auto text-xs underline">
+   283→            limpar
+   284→          </button>
+   285→        </div>
+   286→      ) : null}
+   287→
+   288→      <div className="mt-4 space-y-2.5">
+   289→        {!items ? (
+   290→          <Skeleton className="h-64 w-full rounded-2xl bg-lilas/50" />
+   291→        ) : items.length === 0 ? (
+   292→          <EmptyBox text="Nenhum verbete com esses filtros." />
+   293→        ) : (
+   294→          items.map((e) => <ReviewRow key={e.id} entry={e} pageImage={pageImages.get(e.pdfPage ?? -1) ?? null} selected={selected.has(e.id)} onToggle={() => {
+   295→            const next = new Set(selected)
+   296→            if (next.has(e.id)) next.delete(e.id)
+   297→            else next.add(e.id)
+   298→            setSelected(next)
+   299→          }} onEdit={() => setEditing(e)} onChanged={reload} />)
+   300→        )}
+   301→      </div>
+   302→
+   303→      {totalPages > 1 ? (
+   304→        <div className="mt-4 flex items-center justify-center gap-3">
+   305→          <Button variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="focus-ring h-10 rounded-xl border-linha bg-white px-4 text-sm text-roxo">
+   306→            ← Anterior
+   307→          </Button>
+   308→          <span className="text-sm text-muted-foreground">
+   309→            {page} / {totalPages}
+   310→          </span>
+   311→          <Button variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="focus-ring h-10 rounded-xl border-linha bg-white px-4 text-sm text-roxo">
+   312→            Próxima →
+   313→          </Button>
+   314→        </div>
+   315→      ) : null}
+   316→
+   317→      {editing ? <EditDialog entry={editing} pageImage={pageImages.get(editing.pdfPage ?? -1) ?? null} onClose={() => setEditing(null)} onChanged={reload} /> : null}
+   318→    </div>
+   319→  )
+   320→}
+   321→
+   322→function ReviewRow({
+   323→  entry,
+   324→  pageImage,
+   325→  selected,
+   326→  onToggle,
+   327→  onEdit,
+   328→  onChanged,
+   329→}: {
+   330→  entry: AdminEntry
+   331→  pageImage: string | null
+   332→  selected: boolean
+   333→  onToggle: () => void
+   334→  onEdit: () => void
+   335→  onChanged: () => void
+   336→}) {
+   337→  async function quickPublish() {
+   338→    try {
+   339→      await api('/api/admin/entries/bulk', { method: 'POST', body: JSON.stringify({ ids: [entry.id], action: 'publish' }) })
+   340→      toast({ title: 'Verbete publicado' })
+   341→      onChanged()
+   342→    } catch (e) {
+   343→      toast({ title: e instanceof ApiError ? e.message : 'Falha ao publicar' })
+   344→    }
+   345→  }
+   346→
+   347→  return (
+   348→    <div className={`rounded-2xl border bg-white p-4 ${selected ? 'border-roxo-2/60 ring-1 ring-roxo-2/30' : 'border-linha'}`}>
+   349→      <div className="flex items-start gap-3">
+   350→        <input type="checkbox" checked={selected} onChange={onToggle} aria-label={`Selecionar ${entry.title}`} className="mt-1 h-4 w-4 accent-[#321053]" />
+   351→        <div className="min-w-0 flex-1">
+   352→          <div className="flex flex-wrap items-center gap-2">
+   353→            <span className="font-display text-base font-bold uppercase text-tinta">{entry.title}</span>
+   354→            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${entry.reviewStatus === 'published' ? 'bg-verde-bg text-verde' : 'bg-[#F8F0DC] text-[#8A6A14]'}`}>
+   355→              {entry.reviewStatus === 'published' ? 'publicado' : 'draft'}
+   356→            </span>
+   357→            <span className="rounded-full bg-lilas px-2 py-0.5 text-[10px] font-bold uppercase text-roxo-2">
+   358→              {entry.sourceType === 'pdf_literal' ? `PDF pág. ${entry.pdfPage}` : 'editorial'}
+   359→            </span>
+   360→            {entry.kind === 'novo_simbolo_editorial' ? <span className="text-[10px] font-bold uppercase text-muted-foreground">novo símbolo</span> : null}
+   361→          </div>
+   362→          <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-muted-foreground">{entry.meaning ?? '— sem interpretação —'}</p>
+   363→          <p className="mt-1 text-[12px] text-muted-foreground">
+   364→            {entry.association
+   365→              ? `${entry.association.animal} · grupo ${entry.association.group ?? '—'} · dz ${entry.association.dezena ?? '—'} · ct ${entry.association.centena ?? '—'} · mh ${entry.association.milhar ?? '—'}`
+   366→              : entry.relatedBase
+   367→                ? `→ base: ${entry.relatedBase.title} (${entry.relatedBase.reviewStatus})`
+   368→                : 'sem associação'}
+   369→          </p>
+   370→        </div>
+   371→        <div className="flex shrink-0 flex-col gap-1.5">
+   372→          <Button variant="outline" onClick={onEdit} className="focus-ring h-9 rounded-lg border-linha px-3 text-xs font-bold text-roxo hover:bg-lilas">
+   373→            Revisar
+   374→          </Button>
+   375→          {entry.reviewStatus !== 'published' ? (
+   376→            <Button onClick={() => void quickPublish()} className="focus-ring h-9 rounded-lg bg-roxo px-3 text-xs font-bold text-white hover:bg-roxo-2">
+   377→              Publicar
+   378→            </Button>
+   379→          ) : null}
+   380→        </div>
+   381→      </div>
+   382→      {entry.sourceType === 'pdf_literal' && !pageImage ? (
+   383→        <p className="mt-2 rounded-lg bg-[#FBF9F4] px-3 py-2 text-[11px] text-muted-foreground">
+   384→          Imagem da página {entry.pdfPage} não anexada neste ambiente — conferir no PDF original antes de publicar.
+   385→        </p>
+   386→      ) : null}
+   387→    </div>
+   388→  )
+   389→}
+   390→
+   391→function EditDialog({
+   392→  entry,
+   393→  pageImage,
+   394→  onClose,
+   395→  onChanged,
+   396→}: {
+   397→  entry: AdminEntry
+   398→  pageImage: string | null
+   399→  onClose: () => void
+   400→  onChanged: () => void
+   401→}) {
+   402→  const [title, setTitle] = useState(entry.title)
+   403→  const [meaning, setMeaning] = useState(entry.meaning ?? '')
+   404→  const [animal, setAnimal] = useState(entry.association?.animal ?? '')
+   405→  const [group, setGroup] = useState(entry.association?.group?.toString() ?? '')
+   406→  const [dezena, setDezena] = useState(entry.association?.dezena ?? '')
+   407→  const [centena, setCentena] = useState(entry.association?.centena ?? '')
+   408→  const [milhar, setMilhar] = useState(entry.association?.milhar ?? '')
+   409→  const [busy, setBusy] = useState(false)
+   410→
+   411→  async function save(publish: boolean) {
+   412→    setBusy(true)
+   413→    try {
+   414→      await api('/api/admin/entries', {
+   415→        method: 'PATCH',
+   416→        body: JSON.stringify({
+   417→          id: entry.id,
+   418→          title,
+   419→          meaning,
+   420→          reviewStatus: publish ? 'published' : entry.reviewStatus,
+   421→          association: entry.association ? { animal, group: group ? Number(group) : undefined, dezena, centena, milhar } : undefined,
+   422→        }),
+   423→      })
+   424→      toast({ title: publish ? 'Verbete publicado' : 'Alterações salvas' })
+   425→      onChanged()
+   426→      onClose()
+   427→    } catch (e) {
+   428→      toast({ title: e instanceof ApiError ? e.message : 'Falha ao salvar' })
+   429→    } finally {
+   430→      setBusy(false)
+   431→    }
+   432→  }
+   433→
+   434→  return (
+   435→    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 md:items-center md:p-6" role="dialog" aria-modal="true" aria-label={`Revisar ${entry.title}`}>
+   436→      <div className="nice-scroll max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-3xl bg-papel p-5 md:rounded-3xl md:p-6">
+   437→        <div className="flex items-center justify-between">
+   438→          <h3 className="font-display text-xl font-bold text-tinta">Revisar: {entry.title}</h3>
+   439→          <button type="button" onClick={onClose} aria-label="Fechar" className="focus-ring flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground hover:bg-lilas">
+   440→            ✕
+   441→          </button>
+   442→        </div>
+   443→        <p className="mt-1 text-xs text-muted-foreground">
+   444→          {entry.sourceType === 'pdf_literal' ? `Verbetes do PDF · página ${entry.pdfPage}${entry.printPage ? ` (impressa ${entry.printPage})` : ''}` : `Editorial · ${entry.kind ?? ''}`} · {entry.sourceNotes ?? ''}
+   445→        </p>
+   446→
+   447→        <div className="mt-4 grid gap-4 md:grid-cols-2">
+   448→          <div>
+   449→            <label className="text-xs font-bold uppercase tracking-wide text-roxo" htmlFor="ed-title">Título</label>
+   450→            <Input id="ed-title" value={title} onChange={(e) => setTitle(e.target.value)} className="focus-ring mt-1.5 h-11 rounded-xl border-linha bg-white" />
+   451→            <label className="mt-3 block text-xs font-bold uppercase tracking-wide text-roxo" htmlFor="ed-meaning">Interpretação</label>
+   452→            <Textarea id="ed-meaning" value={meaning} onChange={(e) => setMeaning(e.target.value)} className="focus-ring mt-1.5 min-h-40 rounded-xl border-linha bg-white text-[15px]" />
+   453→
+   454→            {entry.association ? (
+   455→              <fieldset className="mt-3 rounded-xl border border-linha bg-white p-3">
+   456→                <legend className="px-1 text-xs font-bold uppercase tracking-wide text-roxo">Números conferidos</legend>
+   457→                <div className="grid grid-cols-2 gap-2">
+   458→                  <Field label="Bicho" value={animal} onChange={setAnimal} id="ed-animal" />
+   459→                  <Field label="Grupo" value={group} onChange={setGroup} id="ed-group" />
+   460→                  <Field label="Dezena" value={dezena} onChange={setDezena} id="ed-dezena" />
+   461→                  <Field label="Centena" value={centena} onChange={setCentena} id="ed-centena" />
+   462→                  <Field label="Milhar" value={milhar} onChange={setMilhar} id="ed-milhar" />
+   463→                </div>
+   464→              </fieldset>
+   465→            ) : null}
+   466→          </div>
+   467→
+   468→          <div>
+   469→            <p className="text-xs font-bold uppercase tracking-wide text-roxo">Página original (conferência)</p>
+   470→            {pageImage ? (
+   471→              <img src={pageImage} alt={`Página ${entry.pdfPage} do PDF original`} className="mt-1.5 w-full rounded-xl border border-linha" />
+   472→            ) : (
+   473→              <div className="mt-1.5 rounded-xl border border-dashed border-linha bg-white px-4 py-8 text-center text-sm text-muted-foreground">
+   474→                Imagem da página {entry.pdfPage ?? '—'} não anexada neste ambiente.
+   475→                <br />
+   476→                Confira no PDF original antes de publicar.
+   477→              </div>
+   478→            )}
+   479→          </div>
+   480→        </div>
+   481→
+   482→        <div className="mt-5 flex flex-wrap gap-2">
+   483→          <Button onClick={() => void save(true)} disabled={busy} className="focus-ring h-12 rounded-xl bg-roxo px-5 font-bold text-white hover:bg-roxo-2">
+   484→            Salvar e publicar
+   485→          </Button>
+   486→          <Button variant="outline" onClick={() => void save(false)} disabled={busy} className="focus-ring h-12 rounded-xl border-linha bg-white px-5 font-bold text-roxo hover:bg-lilas">
+   487→            Salvar como draft
+   488→          </Button>
+   489→        </div>
+   490→      </div>
+   491→    </div>
+   492→  )
+   493→}
+   494→
+   495→function Field({ label, value, onChange, id }: { label: string; value: string; onChange: (v: string) => void; id: string }) {
+   496→  return (
+   497→    <div>
+   498→      <label htmlFor={id} className="text-[11px] font-semibold uppercase text-muted-foreground">{label}</label>
+   499→      <Input id={id} value={value} onChange={(e) => onChange(e.target.value)} className="focus-ring mt-1 h-9 rounded-lg border-linha bg-[#FCF8F1] text-sm" />
+   500→    </div>
+   501→  )
+   502→}
+   503→
+   504→// ── Aliases ─────────────────────────────────────────────────────────────
+   505→
+   506→type AliasRow = {
+   507→  id: number
+   508→  alias: string
+   509→  normalizedAlias: string
+   510→  status: string
+   511→  kind: string | null
+   512→  entry: { id: string; slug: string; title: string; reviewStatus: string; pdfPage: number | null; association: { animal: string; dezena: string; milhar: string } | null }
+   513→}
+   514→
+   515→function AliasesTab() {
+   516→  const [items, setItems] = useState<AliasRow[] | null>(null)
+   517→  const [status, setStatus] = useState<'draft' | 'active'>('draft')
+   518→  const [page, setPage] = useState(1)
+   519→  const [total, setTotal] = useState(0)
+   520→  const [reloadKey, setReloadKey] = useState(0)
+   521→  const reload = useCallback(() => setReloadKey((k) => k + 1), [])
+   522→
+   523→  useEffect(() => {
+   524→    let alive = true
+   525→    api<{ items: AliasRow[]; total: number }>(`/api/admin/aliases?status=${status}&page=${page}`)
+   526→      .then((res) => {
+   527→        if (!alive) return
+   528→        setItems(res.items)
+   529→        setTotal(res.total)
+   530→      })
+   531→      .catch(() => undefined)
+   532→    return () => {
+   533→      alive = false
+   534→    }
+   535→  }, [status, page, reloadKey])
+   536→
+   537→  async function setActive(id: number, next: 'active' | 'draft') {
+   538→    try {
+   539→      await api('/api/admin/aliases', { method: 'PATCH', body: JSON.stringify({ id, status: next }) })
+   540→      reload()
+   541→    } catch (e) {
+   542→      toast({ title: e instanceof ApiError ? e.message : 'Falha ao atualizar alias' })
+   543→    }
+   544→  }
+   545→
+   546→  const totalPages = Math.max(1, Math.ceil(total / 30))
+   547→
+   548→  return (
+   549→    <div>
+   550→      <p className="rounded-xl bg-[#F8F0DC] px-4 py-3 text-[13px] leading-relaxed text-[#6B5313]">
+   551→        Variações contextuais viram pontos de busca (aliases) — <strong>não herdam números como se estivessem impressas no PDF</strong>. O
+   552→        alias só participa da busca se o verbete-base estiver publicado.
+   553→      </p>
+   554→      <div className="mt-3 flex items-center gap-2">
+   555→        <select value={status} onChange={(e) => { setStatus(e.target.value as 'draft' | 'active'); setPage(1) }} aria-label="Status do alias" className="focus-ring h-10 rounded-xl border border-linha bg-white px-3 text-sm">
+   556→          <option value="draft">Draft ({total > 0 && status === 'draft' ? total : ''})</option>
+   557→          <option value="active">Ativos</option>
+   558→        </select>
+   559→        <span className="ml-auto text-xs text-muted-foreground">{total} aliases</span>
+   560→      </div>
+   561→
+   562→      <div className="mt-4 space-y-2">
+   563→        {!items ? (
+   564→          <Skeleton className="h-56 w-full rounded-2xl bg-lilas/50" />
+   565→        ) : items.length === 0 ? (
+   566→          <EmptyBox text="Nenhum alias com esse filtro." />
+   567→        ) : (
+   568→          items.map((a) => (
+   569→            <div key={a.id} className="flex flex-wrap items-center gap-3 rounded-2xl border border-linha bg-white px-4 py-3">
+   570→              <div className="min-w-0 flex-1">
+   571→                <p className="text-sm font-semibold text-tinta">“{a.alias}”</p>
+   572→                <p className="text-xs text-muted-foreground">
+   573→                  → {a.entry.title} (pág. {a.entry.pdfPage ?? '—'})
+   574→                  {a.entry.association ? ` · ${a.entry.association.animal} · dz ${a.entry.association.dezena}` : ''} · base{' '}
+   575→                  <span className={a.entry.reviewStatus === 'published' ? 'text-verde' : 'text-[#8A6A14]'}>{a.entry.reviewStatus}</span>
+   576→                </p>
+   577→              </div>
+   578→              {a.status === 'draft' ? (
+   579→                <Button onClick={() => void setActive(a.id, 'active')} className="focus-ring h-9 rounded-lg bg-roxo px-3 text-xs font-bold text-white hover:bg-roxo-2">
+   580→                  Ativar
+   581→                </Button>
+   582→              ) : (
+   583→                <Button variant="outline" onClick={() => void setActive(a.id, 'draft')} className="focus-ring h-9 rounded-lg border-linha px-3 text-xs font-bold text-roxo hover:bg-lilas">
+   584→                  Desativar
+   585→                </Button>
+   586→              )}
+   587→            </div>
+   588→          ))
+   589→        )}
+   590→      </div>
+   591→
+   592→      {totalPages > 1 ? (
+   593→        <div className="mt-4 flex items-center justify-center gap-3">
+   594→          <Button variant="outline" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} className="focus-ring h-10 rounded-xl border-linha bg-white px-4 text-sm text-roxo">←</Button>
+   595→          <span className="text-sm text-muted-foreground">{page} / {totalPages}</span>
+   596→          <Button variant="outline" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)} className="focus-ring h-10 rounded-xl border-linha bg-white px-4 text-sm text-roxo">→</Button>
+   597→        </div>
+   598→      ) : null}
+   599→    </div>
+   600→  )
+   601→}
+   602→
+   603→// ── Pagamentos ──────────────────────────────────────────────────────────
+   604→
+   605→function PaymentsTab() {
+   606→  const [eventType, setEventType] = useState('payment.approved')
+   607→  const [email, setEmail] = useState('comprador@exemplo.com')
+   608→  const [offerId, setOfferId] = useState('CAKTO-OFFER-ID-AQUI')
+   609→  const [busy, setBusy] = useState(false)
+   610→  const [result, setResult] = useState<string | null>(null)
+   611→
+   612→  async function simulate() {
+   613→    setBusy(true)
+   614→    setResult(null)
+   615→    try {
+   616→      const res = await api<{ action: string; message: string }>('/api/admin/payments/simulate', {
+   617→        method: 'POST',
+   618→        body: JSON.stringify({ eventType, email, offerId }),
+   619→      })
+   620→      setResult(res.message)
+   621→      toast({ title: 'Evento simulado', description: res.message })
+   622→    } catch (e) {
+   623→      setResult(e instanceof ApiError ? e.message : 'Falha na simulação.')
+   624→    } finally {
+   625→      setBusy(false)
+   626→    }
+   627→  }
+   628→
+   629→  return (
+   630→    <div className="space-y-4">
+   631→      <div className="rounded-2xl border border-linha bg-white p-5">
+   632→        <h3 className="font-display text-lg font-bold text-tinta">Simular evento (teste local)</h3>
+   633→        <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+   634→          Executa o mesmo pipeline do webhook real: idempotência, verificação de oferta e concessão/revogação. Configure os IDs reais
+   635→          (CAKTO_OFFER_*) para simular o mapeamento. Sem IDs reais, a concessão é recusada — comportamento esperado.
+   636→        </p>
+   637→        <div className="mt-3 grid gap-3 md:grid-cols-3">
+   638→          <div>
+   639→            <label htmlFor="sim-type" className="text-xs font-bold uppercase text-muted-foreground">Evento</label>
+   640→            <select id="sim-type" value={eventType} onChange={(e) => setEventType(e.target.value)} className="focus-ring mt-1 h-11 w-full rounded-xl border border-linha bg-[#FCF8F1] px-3 text-sm">
+   641→              <option value="payment.approved">payment.approved (conceder)</option>
+   642→              <option value="payment.refunded">payment.refunded (revogar)</option>
+   643→              <option value="payment.canceled">payment.canceled (revogar)</option>
+   644→            </select>
+   645→          </div>
+   646→          <div>
+   647→            <label htmlFor="sim-email" className="text-xs font-bold uppercase text-muted-foreground">E-mail do comprador</label>
+   648→            <Input id="sim-email" value={email} onChange={(e) => setEmail(e.target.value)} className="focus-ring mt-1 h-11 rounded-xl border-linha bg-[#FCF8F1]" />
+   649→          </div>
+   650→          <div>
+   651→            <label htmlFor="sim-offer" className="text-xs font-bold uppercase text-muted-foreground">Offer_id</label>
+   652→            <Input id="sim-offer" value={offerId} onChange={(e) => setOfferId(e.target.value)} className="focus-ring mt-1 h-11 rounded-xl border-linha bg-[#FCF8F1]" />
+   653→          </div>
+   654→        </div>
+   655→        <Button onClick={() => void simulate()} disabled={busy} className="focus-ring mt-4 h-12 rounded-xl bg-roxo px-6 font-bold text-white hover:bg-roxo-2">
+   656→          {busy ? 'Processando…' : 'Executar evento simulado'}
+   657→        </Button>
+   658→        {result ? <p className="mt-3 rounded-xl bg-lilas/60 px-4 py-3 text-sm text-roxo-2">{result}</p> : null}
+   659→      </div>
+   660→
+   661→      <p className="text-[13px] leading-relaxed text-muted-foreground">
+   662→        Webhook real: <code className="rounded bg-lilas px-1.5 py-0.5 text-xs">POST /api/webhooks/cakto</code> — ver README para
+   663→        assinatura HMAC e campos confirmados.
+   664→      </p>
+   665→    </div>
+   666→  )
+   667→}
+   668→
+   669→// ── Catálogo ────────────────────────────────────────────────────────────
+   670→
+   671→function CatalogTab() {
+   672→  const [payload, setPayload] = useState('')
+   673→  const [result, setResult] = useState<string | null>(null)
+   674→  const [busy, setBusy] = useState(false)
+   675→
+   676→  async function import_() {
+   677→    setBusy(true)
+   678→    setResult(null)
+   679→    try {
+   680→      const res = await fetch('/api/admin/catalog', { method: 'POST', body: payload, headers: { 'Content-Type': 'text/plain' } })
+   681→      const data = (await res.json()) as { imported?: number; rejected?: number; errors?: string[]; error?: { message: string } }
+   682→      if (!res.ok) {
+   683→        setResult(data.error?.message ?? 'Falha na importação.')
+   684→        return
+   685→      }
+   686→      setResult(`${data.imported ?? 0} itens importados como draft · ${data.rejected ?? 0} rejeitados${data.errors?.length ? ` — ex.: ${data.errors[0]}` : ''}`)
+   687→    } catch {
+   688→      setResult('Falha na importação.')
+   689→    } finally {
+   690→      setBusy(false)
+   691→    }
+   692→  }
+   693→
+   694→  return (
+   695→    <div className="space-y-4">
+   696→      <div className="rounded-2xl border border-linha bg-white p-5">
+   697→        <h3 className="font-display text-lg font-bold text-tinta">Importar lista de centenas/milhares</h3>
+   698→        <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+   699→          Aceita JSON (array com value, value_kind, source_name, methodology, reference_period) ou CSV com cabeçalho. Origem e critério
+   700→          são obrigatórios — sem eles a linha é rejeitada. Itens entram como <strong>draft</strong>; nada é exibido ao público até
+   701→          revisão e publicação.
+   702→        </p>
+   703→        <Textarea
+   704→          value={payload}
+   705→          onChange={(e) => setPayload(e.target.value)}
+   706→          placeholder={'[{"value":"0534","value_kind":"centena","source_name":"lista X","methodology":"critério…","reference_period":"2024-01 a 2024-12"}]'}
+   707→          className="focus-ring mt-3 min-h-36 rounded-xl border-linha bg-[#FCF8F1] font-mono text-xs"
+   708→        />
+   709→        <Button onClick={() => void import_()} disabled={busy || !payload.trim()} className="focus-ring mt-3 h-11 rounded-xl bg-roxo px-5 font-bold text-white hover:bg-roxo-2">
+   710→          {busy ? 'Importando…' : 'Importar lista'}
+   711→        </Button>
+   712→        {result ? <p className="mt-3 rounded-xl bg-lilas/60 px-4 py-3 text-sm text-roxo-2">{result}</p> : null}
+   713→      </div>
+   714→      <p className="text-[13px] leading-relaxed text-muted-foreground">
+   715→        Regra: enquanto não houver lista com origem verificada, o público vê apenas o aviso de indisponível — nunca valores nem
+   716→        alegações de “viciadas”.
+   717→      </p>
+   718→    </div>
+   719→  )
+   720→}
+   721→
+   722→// ── OTP dev ─────────────────────────────────────────────────────────────
+   723→
+   724→type MailRow = { id: string; toEmail: string; subject: string; body: string; code: string | null; transport: string; createdAt: string }
+   725→
+   726→function OtpTab() {
+   727→  const [data, setData] = useState<{ available: boolean; notice?: string; items?: MailRow[]; message?: string } | null>(null)
+   728→
+   729→  useEffect(() => {
+   730→    api<{ available: boolean; notice?: string; items?: MailRow[]; message?: string }>('/api/admin/otp-mailbox')
+   731→      .then(setData)
+   732→      .catch(() => setData({ available: false, message: 'Erro ao carregar caixa OTP.' }))
+   733→  }, [])
+   734→
+   735→  if (!data) return <Skeleton className="h-56 w-full rounded-2xl bg-lilas/50" />
+   736→  if (!data.available) return <EmptyBox text={data.message ?? 'Indisponível neste modo.'} />
+   737→
+   738→  return (
+   739→    <div>
+   740→      <p className="rounded-xl bg-[#F8F0DC] px-4 py-3 text-[13px] leading-relaxed text-[#6B5313]">{data.notice}</p>
+   741→      <div className="mt-4 space-y-2.5">
+   742→        {data.items?.length === 0 ? <EmptyBox text="Nenhum e-mail gerado ainda." /> : null}
+   743→        {data.items?.map((m) => (
+   744→          <div key={m.id} className="rounded-2xl border border-linha bg-white p-4">
+   745→            <div className="flex items-center justify-between gap-3">
+   746→              <p className="text-sm font-semibold text-tinta">{m.toEmail}</p>
+   747→              {m.code ? <span className="font-display rounded-lg bg-roxo px-3 py-1 text-lg font-bold tracking-[0.25em] text-ouro">{m.code}</span> : <span className="text-xs text-muted-foreground">{m.transport}</span>}
+   748→            </div>
+   749→            <p className="mt-1 text-xs text-muted-foreground">{m.subject} · {new Date(m.createdAt).toLocaleString('pt-BR')}</p>
+   750→            {m.code ? <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-[#FBF9F4] px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">{m.body}</pre> : null}
+   751→          </div>
+   752→        ))}
+   753→      </div>
+   754→    </div>
+   755→  )
+   756→}
+   757→
+   758→function EmptyBox({ text }: { text: string }) {
+   759→  return <div className="rounded-2xl border border-dashed border-linha bg-white/70 px-6 py-8 text-center text-sm text-muted-foreground">{text}</div>
+   760→}
+   761→

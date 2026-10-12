@@ -8,6 +8,7 @@ export type Entitlement = {
   productKey: ProductKey
   status: string
   offerId?: string
+  paymentId?: string | null
   grantedAt?: string | null
 }
 

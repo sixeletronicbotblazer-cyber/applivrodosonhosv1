@@ -4,11 +4,14 @@
 // book_pdf: busca/ferramentas aparecem travadas com CTA de upgrade (sem liberar premium).
 
 import { useState } from 'react'
-import { useApp } from '@/lib/app-store'
+import Image from 'next/image'
+import { useApp, type ViewName } from '@/lib/app-store'
 import { PageHeader } from '@/components/livro/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { SkeletonCard } from '@/components/livro/States'
+
+type NavigateFn = (view: ViewName, opts?: { slug?: string; params?: Record<string, string> }) => void
 
 export function InicioView() {
   const { me, navigate, meLoading } = useApp()
@@ -23,7 +26,7 @@ export function InicioView() {
 
   return (
     <div>
-      <PageHeader title="Livro dos Sonhos" subtitle={`Bom dia${firstName ? `, ${firstName}` : ''} · sua consulta, no seu ritmo`} />
+      <PageHeader title="Livro dos Sonhos" subtitle={`Olá${firstName ? `, ${firstName}` : ''} · sua consulta, no seu ritmo`} />
 
       <div className="mx-auto w-full max-w-3xl px-5 py-7 md:px-8">
         <h2 className="font-display text-3xl font-bold leading-tight text-tinta md:text-4xl">O que você sonhou?</h2>
@@ -86,7 +89,7 @@ export function InicioView() {
               onClick={() => navigate('livro')}
               className="focus-ring mt-4 flex w-full items-center gap-4 rounded-2xl border border-linha bg-[#F8F0DC] px-4 py-4 text-left transition-colors hover:bg-[#F4EAD0]"
             >
-              <img src="/book/capa.jpg" alt="Capa do Livro dos Sonhos" className="h-16 w-12 rounded-md object-cover shadow-sm" />
+              <Image src="/book/capa.jpg" alt="Capa do Livro dos Sonhos" width={48} height={68} className="rounded-md object-cover shadow-sm" />
               <span>
                 <span className="block font-display text-lg font-bold text-tinta">Seu livro também está aqui</span>
                 <span className="mt-0.5 block text-sm font-medium text-roxo-2">Abrir o PDF original →</span>
@@ -125,7 +128,7 @@ function PathCard({ icon, title, description, onClick }: { icon: React.ReactNode
   )
 }
 
-function PlanoPdfView({ navigate }: { navigate: ReturnType<typeof useApp>['navigate'] }) {
+function PlanoPdfView({ navigate }: { navigate: NavigateFn }) {
   return (
     <div className="mt-6">
       <section className="rounded-3xl bg-roxo px-6 py-7 text-white md:px-8">
@@ -152,7 +155,7 @@ function PlanoPdfView({ navigate }: { navigate: ReturnType<typeof useApp>['navig
   )
 }
 
-function SemAcessoView({ email, navigate }: { email: string; navigate: ReturnType<typeof useApp>['navigate'] }) {
+function SemAcessoView({ email, navigate }: { email: string; navigate: NavigateFn }) {
   return (
     <div className="mt-6 space-y-4">
       <section className="rounded-2xl border border-linha bg-white px-6 py-6">

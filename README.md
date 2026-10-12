@@ -16,7 +16,8 @@ resultado de jogo.
 
 - Next.js 16 (App Router) + TypeScript + Tailwind CSS 4 + shadcn/ui
 - Prisma ORM + SQLite (`db/custom.db`) — schema adaptado do `schema.sql` (referência PostgreSQL)
-- Sessões próprias com cookie httpOnly + OTP de 6 dígitos por e-mail (SMTP via nodemailer)
+- Sessões próprias com cookie httpOnly · acesso pelo e-mail da compra (`POST /api/auth/access`, sem código na tela)
+- OTP por e-mail permanece disponível no servidor como fluxo alternativo (`/api/auth/request-otp`, `/api/auth/verify-otp`), mas a interface do comprador não usa código
 - Zustand para estado de navegação (SPA com rotas por hash: `#/inicio`, `#/verbete/cavalo`, …)
 - PWA: `public/manifest.webmanifest` + service worker (`public/sw.js`, registrado só em produção)
 
@@ -73,22 +74,46 @@ página 4 antes de qualquer uso público.
 | `pdf@livrodossonhos.app` | USER | somente PDF (ferramentas travadas) |
 | `outro@livrodossonhos.app` | USER | sem compra (tela de orientação) |
 
-Qualquer e-mail recebe OTP neste modo. **Com `DEMO_MODE=false` e SMTP configurado,
-os códigos saem apenas por e-mail** — nunca exibidos na interface, sem OTP universal.
+Qualquer e-mail válido entra na prévia e recebe o **pacote completo de demonstração**
+(sessão de demonstração, idempotente) — exceto `pdf@` (mantém o estado "só PDF"
+com ferramentas travadas) e `outro@` (mantém o estado "sem compra"). Assim a
+distinção de planos continua testável. **Esse comportamento só existe com
+`DEMO_MODE=true`; em produção nunca é aplicado.**
+
+## Fluxo de acesso (sem código de 6 dígitos)
+
+1. Comprador informa o e-mail usado na compra em `#/entrar` e clica em
+   **Acessar aplicativo** — validação de campo, estado de carregamento no botão
+   e redirecionamento imediato para `#/inicio`.
+2. **Produção:** `POST /api/auth/access` só estabelece sessão quando existe
+   `Entitlement.status = 'active'` vinculado a esse e-mail (nascido do pagamento
+   confirmado pelo webhook da plataforma). Sem compra confirmada → resposta
+   neutra `purchase_not_found`; a tela nunca revela detalhes técnicos.
+3. **Prévia/DEMO_MODE:** qualquer e-mail válido recebe a sessão de demonstração
+   com pacote completo, preservando as contas semeadas para testar cada plano.
+4. Sessão persistente (cookie httpOnly, 30 dias): voltar ao app com sessão
+   ativa abre `#/inicio` diretamente.
+
+> **Integração de compra ainda não configurada:** enquanto os `CAKTO_*` não
+> estiverem definidos no `.env`, o acesso completo só acontece na prévia
+> (DEMO_MODE). Isso está documentado AQUI e nunca é exibido na tela do
+> comprador.
 
 ## Integrações pendentes (código pronto, aguardando credenciais)
 
-1. **E-mail real (OTP):** definir `SMTP_*` no `.env`. Sem isso, o app opera em
-   modo de desenvolvimento isolado (caixa OTP no /admin claramente rotulada).
-2. **Cakto:** definir `CAKTO_WEBHOOK_SECRET` (HMAC-SHA256 do corpo bruto, aceito
-   como `sha256=<hex>`) e os `CAKTO_OFFER_*` reais. Endpoint:
-   `POST /api/webhooks/cakto`.
+1. **Cakto (obrigatório para acesso real em produção):** definir
+   `CAKTO_WEBHOOK_SECRET` (HMAC-SHA256 do corpo bruto, aceito como `sha256=<hex>`)
+   e os `CAKTO_OFFER_*` reais. Endpoint: `POST /api/webhooks/cakto`.
    - Idempotente por ID de evento (`payment_events.provider_event_id`).
    - Aprovado → entitlement `active`; estorno/cancelamento → `revoked`.
    - **O schema do payload da Cakto precisa ser confirmado na documentação oficial
      antes de ativar em produção** — os seletores em `src/lib/webhook-cakto.ts`
      são flexíveis e documentados; ajuste os campos conforme a doc.
    - Reconciliação: aba Pagamentos do /admin + tabela `payment_events`.
+2. **SMTP (opcional):** o fluxo de OTP por e-mail segue implementado no servidor
+   (`/api/auth/request-otp` + `/api/auth/verify-otp`) como alternativa de
+   verificação de posse do e-mail; a interface atual do comprador não o usa.
+   Para ativá-lo, definir `SMTP_*` no `.env`.
 3. **Módulo Federal:** produto separado. Exige entitlement `federal_addon` **e**
    `FEDERAL_FEED_URL` de fonte autorizada. Sem ambos, permanece bloqueado
    (nunca exibe resultados fictícios).

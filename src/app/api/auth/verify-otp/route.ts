@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server'
 import { verifyOtp } from '@/lib/auth'
 import { clientIp } from '@/lib/rate-limit'
-import { apiError } from '@/lib/api-helpers'
+import { apiError, type ApiErrorCode } from '@/lib/api-helpers'
 import { getActiveEntitlements } from '@/lib/entitlements'
 
 // POST /api/auth/verify-otp — valida o código e cria a sessão (cookie httpOnly).
-const REASONS: Record<string, { code: string; message: string; status: number }> = {
+const REASONS: Record<string, { code: ApiErrorCode; message: string; status: number }> = {
   invalid: { code: 'invalid_code', message: 'Código incorreto. Confira os 6 dígitos.', status: 400 },
   expired: { code: 'expired_code', message: 'Código expirado. Solicite um novo.', status: 400 },
   too_many_attempts: { code: 'too_many_attempts', message: 'Muitas tentativas. Solicite um novo código.', status: 429 },

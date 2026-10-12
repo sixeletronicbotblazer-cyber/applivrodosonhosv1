@@ -4,6 +4,7 @@
 // Disponível para book_pdf e book_app (rota de leitura do produto básico).
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { api, ApiError } from '@/lib/app-client'
 import { useApp } from '@/lib/app-store'
 import { PageHeader } from '@/components/livro/PageHeader'
@@ -98,9 +99,11 @@ export function LivroView() {
               </div>
 
               <div className="nice-scroll mt-4 max-h-[70vh] overflow-auto rounded-2xl border border-linha bg-white p-3">
-                <img
+                <Image
                   src={currentPage.imagePath ?? ''}
                   alt={`Página do livro — ${currentPage.title}`}
+                  width={774}
+                  height={1095}
                   style={{ width: `${zoom * 100}%` }}
                   className="mx-auto block h-auto max-w-full rounded-lg"
                 />
@@ -156,7 +159,7 @@ export function LivroView() {
                               <li key={e.slug}>
                                 <button
                                   type="button"
-                                  onClick={() => navigate('verbete', { slug: e.slug })}
+                                  onClick={() => navigate('verbete', { slug: e.slug, params: { de: 'indice' } })}
                                   className="focus-ring flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left transition-colors hover:bg-[#FBF7F2]"
                                 >
                                   <span className="flex min-w-0 items-center gap-2">

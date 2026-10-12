@@ -43,15 +43,23 @@ export function SalvosView() {
   }, [])
 
   async function remove(slug: string) {
-    await api(`/api/saved?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' })
-    setItems((prev) => prev?.filter((i) => i.slug !== slug) ?? [])
-    toast({ title: 'Removido dos salvos' })
+    try {
+      await api(`/api/saved?slug=${encodeURIComponent(slug)}`, { method: 'DELETE' })
+      setItems((prev) => prev?.filter((i) => i.slug !== slug) ?? [])
+      toast({ title: 'Removido dos salvos' })
+    } catch {
+      toast({ title: 'Não foi possível remover agora', description: 'Tente novamente em instantes.' })
+    }
   }
 
   async function clearAll() {
-    await api('/api/saved?all=1', { method: 'DELETE' })
-    setItems([])
-    toast({ title: 'Lista de salvos apagada' })
+    try {
+      await api('/api/saved?all=1', { method: 'DELETE' })
+      setItems([])
+      toast({ title: 'Lista de salvos apagada' })
+    } catch {
+      toast({ title: 'Não foi possível apagar agora', description: 'Tente novamente em instantes.' })
+    }
   }
 
   return (
@@ -90,7 +98,7 @@ export function SalvosView() {
               {items.map((it) => (
                 <div key={it.slug} className="rounded-2xl border border-linha bg-white p-5">
                   <div className="flex items-start justify-between gap-3">
-                    <button type="button" onClick={() => navigate('verbete', { slug: it.slug })} className="focus-ring min-w-0 flex-1 text-left">
+                    <button type="button" onClick={() => navigate('verbete', { slug: it.slug, params: { de: 'salvos' } })} className="focus-ring min-w-0 flex-1 text-left">
                       <h3 className="font-display truncate text-lg font-bold uppercase tracking-tight text-roxo">{it.title}</h3>
                       <p className="mt-0.5 text-sm text-muted-foreground">
                         {it.animal ? `${it.animal} · dezena ${it.dezena ?? '—'}` : 'Sugestão editorial'}

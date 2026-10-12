@@ -7,6 +7,12 @@ export type ApiErrorCode =
   | 'upgrade_required'
   | 'not_found'
   | 'bad_request'
+  | 'invalid_email'
+  | 'invalid_code'
+  | 'expired_code'
+  | 'too_many_attempts'
+  | 'no_code'
+  | 'purchase_not_found'
   | 'rate_limited'
   | 'server_error'
 

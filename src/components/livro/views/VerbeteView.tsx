@@ -18,14 +18,22 @@ function displayTitle(raw: string): string {
   return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase()
 }
 
+const BACK_FROM: Record<string, { view: 'buscar' | 'livro' | 'salvos' | 'ferramentas'; label: string; params?: Record<string, string> }> = {
+  buscar: { view: 'buscar', label: 'Voltar à busca' },
+  indice: { view: 'livro', label: 'Voltar ao índice A–Z', params: { aba: 'indice' } },
+  salvos: { view: 'salvos', label: 'Voltar aos salvos' },
+  bichos: { view: 'ferramentas', label: 'Voltar às ferramentas', params: { aba: 'bichos' } },
+}
+
 export function VerbeteView() {
   const { route, navigate } = useApp()
   const slug = route.slug
+  const back = BACK_FROM[route.params.de ?? ''] ?? BACK_FROM.buscar
   const [data, setData] = useState<{ slug: string; entry: EntryDetail | null; error: string | null } | null>(null)
   const [savedBusy, setSavedBusy] = useState(false)
 
-  const entry = data?.slug === slug ? data.entry : null
-  const error = data?.slug === slug ? data.error : null
+  const entry = data && data.slug === slug ? data.entry : null
+  const error = data && data.slug === slug ? data.error : null
   const loading = !slug || data === null || data.slug !== slug
 
   useEffect(() => {
@@ -68,6 +76,7 @@ export function VerbeteView() {
       <div>
         <PageHeader title="Resultado da consulta" subtitle="Verbete conferido no Livro dos Sonhos" />
         <div className="mx-auto w-full max-w-3xl space-y-4 px-5 py-7 md:px-8">
+          <BackLink label={back.label} onClick={() => navigate(back.view, { params: back.params })} />
           <SkeletonCard />
           <SkeletonCard />
         </div>
@@ -80,15 +89,18 @@ export function VerbeteView() {
       <div>
         <PageHeader title="Resultado da consulta" subtitle="Verbete conferido no Livro dos Sonhos" />
         <div className="mx-auto w-full max-w-3xl px-5 py-7 md:px-8">
+          <BackLink label={back.label} onClick={() => navigate(back.view, { params: back.params })} />
+          <div className="mt-4">
           <EmptyState
             title="Verbete não disponível"
             description={error ?? 'Este verbete pode ainda estar em revisão editorial.'}
             action={
-              <Button onClick={() => navigate('buscar')} className="focus-ring h-11 rounded-xl bg-roxo px-5 text-white hover:bg-roxo-2">
-                Voltar à busca
+              <Button onClick={() => navigate(back.view, { params: back.params })} className="focus-ring h-11 rounded-xl bg-roxo px-5 text-white hover:bg-roxo-2">
+                {back.label}
               </Button>
             }
           />
+          </div>
         </div>
       </div>
     )
@@ -102,7 +114,8 @@ export function VerbeteView() {
       <PageHeader title="Resultado da consulta" subtitle="Verbete conferido no Livro dos Sonhos" />
 
       <div className="mx-auto w-full max-w-3xl px-5 py-7 md:px-8">
-        <div className="flex items-start justify-between gap-4">
+        <BackLink label={back.label} onClick={() => navigate(back.view, { params: back.params })} />
+        <div className="mt-3 flex items-start justify-between gap-4">
           <h2 className="font-display text-4xl font-bold tracking-tight text-tinta md:text-5xl">{displayTitle(entry.title)}</h2>
           <button
             type="button"
@@ -220,6 +233,18 @@ export function VerbeteView() {
         </aside>
       </div>
     </div>
+  )
+}
+
+function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="focus-ring text-sm font-semibold text-roxo-2 underline-offset-2 hover:underline"
+    >
+      ← {label}
+    </button>
   )
 }
 

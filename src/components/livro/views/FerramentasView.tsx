@@ -14,7 +14,14 @@ import { toast } from '@/hooks/use-toast'
 
 export function FerramentasView() {
   const { navigate, route, me, appConfig } = useApp()
-  const [tab, setTab] = useState<'menu' | 'bichos' | 'gerador'>(route.params.aba === 'bichos' ? 'bichos' : route.params.aba === 'gerador' ? 'gerador' : 'menu')
+  const abaParam = route.params.aba === 'bichos' || route.params.aba === 'gerador' ? route.params.aba : 'menu'
+  const [tab, setTab] = useState<'menu' | 'bichos' | 'gerador'>(abaParam)
+
+  // hash pode mudar com a view já montada (ex.: card do Início → ?aba=bichos):
+  // mantém a aba interna em sincronia com a rota
+  useEffect(() => {
+    setTab(abaParam)
+  }, [abaParam])
 
   const catalogPublishedCount = 0 // catálogo só exibe valores com lista importada e revisada
 
@@ -40,14 +47,14 @@ export function FerramentasView() {
               title="Tabela dos 25 bichos"
               description="Consulte grupos e dezenas."
               cta="Ver tabela"
-              onClick={() => setTab('bichos')}
+              onClick={() => navigate('ferramentas', { params: { aba: 'bichos' } })}
             />
             <ToolCard
               n="03"
               title="Combinações por grupo"
               description="Monte combinações para consulta."
               cta="Gerar combinação"
-              onClick={() => setTab('gerador')}
+              onClick={() => navigate('ferramentas', { params: { aba: 'gerador' } })}
             />
             <ToolCard
               n="04"

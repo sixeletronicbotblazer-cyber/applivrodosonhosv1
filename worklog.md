@@ -47,3 +47,33 @@ Stage Summary:
 - Verificado no browser (Agent Browser): telas 01–05 reproduzidas (entrar, início, busca, verbete Cavalo com COBRA·09·34·534·8534, ferramentas), fluxo OTP com banner dev rotulado, salvar verbete, livro com página 46 original + zoom, índice A–Z com letras, tabela dos bichos com badges conferido/em revisão, gerador com semente do dia, admin (visão geral 1076/14/656/406, revisão lado a lado, caixa OTP dev, simulação de pagamento com recusa de offer não mapeada e concessão com DEMO-OFFER), responsividade 320/390/1440, footer fixo sem sobreposição
 - Dados resetados ao estado de seed limpo ao final
 - Pendências documentadas no README: SMTP real, IDs Cakto reais + doc oficial do payload, fonte da Federal, lista do catálogo, PDF completo do livro
+
+---
+Task ID: 2
+Agent: Z.ai Code (orquestrador)
+Task: Ajuste do app existente — nova tela de entrada, fluxo de acesso sem código, revisão geral, responsividade
+
+Work Log:
+- Inspeção: mapeadas 9 views (entrar/inicio/buscar/verbete/livro/ferramentas/salvos/conta/admin), 15 rotas de API, store zustand com hash-routing, gating por entitlements no servidor
+- Novo endpoint POST /api/auth/access: valida e-mail, rate limit 20/h por IP; produção só cria sessão com Entitlement ativo (resposta neutra purchase_not_found); prévia (DEMO_MODE) cria sessão de demonstração com pacote completo para qualquer e-mail (idempotente via paymentId determinístico), preservando pdf@ (só PDF) e outro@ (sem compra)
+- auth.ts: extraído createSession(user, ip) reutilizável (cookie httpOnly, 30 dias)
+- EntrarView reescrita: marca pequena no topo, carta central max-w-[440px] (desktop) / largura cheia (mobile), capa do livro como detalhe visual (next/image), título "Seu Livro dos Sonhos está pronto para consultar.", campo único "Seu e-mail", botão "Acessar aplicativo" com estado Entrando… (spinner, imune a cliques repetidos), link discreto "Precisa de ajuda para acessar?"; removidos 6 campos de código, contador de reenvio, avisos SMTP/devCode, e-mails demo e textos técnicos
+- Fluxo: e-mail → /api/auth/access → refreshMe → navigate('inicio') imediato; sessão ativa ao voltar abre #/inicio direto (RedirectToInicio já existente)
+- VerbeteView: adicionado "← Voltar" contextual via param de=buscar|indice|salvos (também no estado de carregamento/erro)
+- LivroView: índice abre verbete com de=indice; <img> → next/image
+- FerramentasView: abas internas sincronizadas com ?aba= do hash (cards do Início agora navegam por hash)
+- SalvosView: try/catch + toast em remover/apagar todos; verbete abre com de=salvos
+- InicioView: "Bom dia" → "Olá"; capa com next/image (remove warning de dimensão — provável origem do "1 Issue")
+- /api/me + app-client: entitlements agora incluem paymentId (corrige key da lista de compras na Conta)
+- Corrigidos 5 erros de tipo TS pré-existentes (verify-otp ApiErrorCode, Verbete data null, InicioView NavigateFn)
+- AdminView: <img> → next/image unoptimized (página de conferência)
+- README.md: nova seção "Fluxo de acesso (sem código de 6 dígitos)" + integração Cakto marcada como obrigatória para produção; nota de que a pendência fica SÓ na documentação, nunca na tela
+
+Stage Summary:
+- Verificado no browser (Agent Browser): fluxo completo e-mail → Acessar aplicativo → #/inicio → busca "cavalo" → verbete (salvar) → voltar → livro (página 46 + zoom + índice A–Z) → ferramentas (bichos + gerador) → salvos → conta → sair → entrar novamente; sessão ativa ao recarregar abre #/inicio direto
+- Planos preservados: pdf@ = ferramentas travadas com gate de upgrade; outro@ = "Localizando sua compra…"; admin@ = painel /admin acessível
+- Responsividade: 0px de rolagem horizontal em 320/390/768/1440 em inicio/buscar/livro/bichos; botão de acesso a 495px do topo em 390x844 (teclado não cobre); rodapé fixo com safe-area
+- Console/erros: zero warnings e zero erros após correção do next/image
+- Capturas: download/nova-tela-acesso-celular.png (390px), nova-tela-acesso-celular-320.png, nova-tela-acesso-desktop.png (1440px)
+- Pendência documentada (não na tela): CAKTO_* reais para acesso pago em produção; SMTP opcional para OTP alternativo
+- Dados de teste criados em demo: usuário cliente@teste.com.br com entitlement demo book_app (idempotente, esperado em DEMO_MODE)

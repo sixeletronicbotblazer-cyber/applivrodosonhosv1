@@ -1,103 +1,94 @@
 'use client'
 
-// Tela 01 — acesso por e-mail + código OTP de 6 dígitos.
-// O código NUNCA é gerado/exposto na tela: chega por e-mail. Em modo de
-// desenvolvimento isolado (sem SMTP), o backend devolve devCode e a UI o exibe
-// dentro de um aviso claramente rotulado que não existe com SMTP configurado.
+// Tela de entrada — um único campo de e-mail, botão "Acessar aplicativo" e
+// redirecionamento imediato para o início. Sem código, sem etapas intermediárias,
+// sem avisos técnicos: o comprador informa o e-mail usado na compra e entra.
+// Em produção, o acesso é validado pelo vínculo da compra (entitlements);
+// a experiência mostrada aqui é sempre neutra e acolhedora.
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import Image from 'next/image'
+import { Loader2 } from 'lucide-react'
 import { api, ApiError } from '@/lib/app-client'
 import { useApp } from '@/lib/app-store'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { InputOTP, InputOTPGroup, InputOTPSlot, InputOTPSeparator } from '@/components/ui/input-otp'
-import { toast } from '@/hooks/use-toast'
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/
 
 export function EntrarView() {
-  const { refreshMe, appConfig } = useApp()
-  const [step, setStep] = useState<'email' | 'code'>('email')
+  const { refreshMe, navigate } = useApp()
   const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [devCode, setDevCode] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [cooldown, setCooldown] = useState(0)
 
-  useEffect(() => {
-    if (cooldown <= 0) return
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000)
-    return () => clearTimeout(t)
-  }, [cooldown])
-
-  async function requestCode() {
-    setError(null)
-    if (!email.trim()) {
+  async function acessar() {
+    if (busy) return
+    const value = email.trim()
+    if (!value) {
       setError('Informe o e-mail usado na compra.')
       return
     }
-    setBusy(true)
-    try {
-      const res = await api<{ devCode?: string; resendCooldownSeconds: number; message: string }>('/api/auth/request-otp', {
-        method: 'POST',
-        body: JSON.stringify({ email: email.trim() }),
-      })
-      setStep('code')
-      setDevCode(res.devCode ?? null)
-      setCooldown(res.resendCooldownSeconds ?? 60)
-      toast({ title: 'Código enviado', description: appConfig?.smtpConfigured ? 'Confira sua caixa de entrada.' : 'Veja o aviso de modo de desenvolvimento abaixo.' })
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Não foi possível enviar o código. Tente novamente.')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function confirmCode() {
-    setError(null)
-    if (code.length !== 6) {
-      setError('Digite o código completo de 6 dígitos.')
+    if (!EMAIL_RE.test(value)) {
+      setError('Confira o e-mail digitado — parece incompleto.')
       return
     }
+    setError(null)
     setBusy(true)
     try {
-      await api('/api/auth/verify-otp', { method: 'POST', body: JSON.stringify({ email: email.trim(), code }) })
+      await api('/api/auth/access', { method: 'POST', body: JSON.stringify({ email: value }) })
       await refreshMe()
-      toast({ title: 'Acesso liberado', description: 'Boa consulta!' })
+      navigate('inicio')
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Código inválido. Tente novamente.')
-      setCode('')
+      setError(e instanceof ApiError ? e.message : 'Não foi possível entrar agora. Tente novamente em instantes.')
     } finally {
+      // se o redirecionamento não acontecer (falha de sessão), libera o botão de novo
       setBusy(false)
     }
   }
 
   return (
-    <div className="min-h-screen bg-papel">
-      {/* Hero roxo (tela 01) */}
-      <div className="bg-roxo px-5 pt-10 pb-24 md:px-8 md:pt-14 md:pb-32">
-        <div className="mx-auto w-full max-w-3xl">
-          <p className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-[0.18em] text-ouro md:text-base">
-            <span aria-hidden="true">◆</span> Livro dos Sonhos
-          </p>
-          <h1 className="font-display mt-6 text-4xl font-bold leading-[1.08] text-white md:text-5xl">
-            Seu acesso começa aqui.
-          </h1>
-          <p className="mt-3 text-[15px] text-[#CDBBE0] md:text-base">Entre com o e-mail usado na compra.</p>
-        </div>
-      </div>
+    <div className="relative flex min-h-svh flex-col overflow-hidden bg-papel">
+      {/* detalhes suaves de fundo (identidade das páginas internas) */}
+      <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-lilas blur-3xl" />
+      <div aria-hidden="true" className="pointer-events-none absolute -bottom-28 -right-20 h-72 w-72 rounded-full bg-ouro/25 blur-3xl" />
 
-      {/* Cartão branco de acesso */}
-      <div className="mx-auto -mt-16 w-full max-w-3xl px-5 pb-16 md:-mt-24 md:px-8">
-        <div className="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/[0.03] md:p-8">
-          <h2 className="font-display text-2xl font-bold text-tinta md:text-3xl">Entrar no aplicativo</h2>
-          <p className="mt-1.5 text-[15px] text-muted-foreground">Enviaremos um código de 6 dígitos por e-mail.</p>
+      {/* marca discreta no topo */}
+      <header className="relative z-10 flex items-center justify-center px-5 pb-2 pt-6">
+        <p className="flex items-center gap-2 font-display text-sm font-bold uppercase tracking-[0.18em] text-roxo">
+          <span aria-hidden="true" className="text-ouro">
+            ✦
+          </span>
+          Livro dos Sonhos
+        </p>
+      </header>
 
-          {step === 'email' ? (
+      {/* cartão central (440px no desktop, largura disponível no celular) */}
+      <main className="relative z-10 flex flex-1 flex-col items-center px-5 pb-8 pt-4 md:justify-center md:pt-0">
+        <div className="w-full max-w-[440px]">
+          <div className="rounded-3xl bg-white p-6 shadow-[0_10px_40px_-18px_rgba(50,16,83,0.25)] ring-1 ring-black/[0.04] sm:p-8">
+            <div className="flex flex-col items-center text-center">
+              <Image
+                src="/book/capa.jpg"
+                alt="Capa do Livro dos Sonhos"
+                width={64}
+                height={91}
+                className="rounded-lg shadow-md ring-1 ring-black/10"
+                priority
+              />
+              <h1 className="font-display mt-4 text-[26px] font-bold leading-[1.15] text-tinta sm:text-[28px]">
+                Seu Livro dos Sonhos está pronto para consultar.
+              </h1>
+              <p className="mt-2 text-[15px] leading-relaxed text-muted-foreground">
+                Entre com o e-mail usado na compra para acessar seu material.
+              </p>
+            </div>
+
             <form
               className="mt-6"
               onSubmit={(e) => {
                 e.preventDefault()
-                void requestCode()
+                void acessar()
               }}
             >
               <label htmlFor="email" className="text-xs font-bold uppercase tracking-widest text-roxo">
@@ -108,111 +99,57 @@ export function EntrarView() {
                 type="email"
                 inputMode="email"
                 autoComplete="email"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                autoFocus
                 placeholder="voce@exemplo.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="focus-ring mt-2 h-14 rounded-2xl border-linha bg-[#FCF8F1] px-4 text-base"
+                onChange={(e) => {
+                  setEmail(e.target.value)
+                  if (error) setError(null)
+                }}
+                className="focus-ring mt-2 h-13 rounded-2xl border-linha bg-papel px-4 text-base"
                 required
               />
               {error ? (
-                <p role="alert" className="mt-2 text-sm font-medium text-destructive">
+                <p role="alert" className="mt-2.5 text-sm font-medium text-destructive">
                   {error}
                 </p>
               ) : null}
               <Button
                 type="submit"
                 disabled={busy}
-                className="focus-ring mt-4 h-14 w-full justify-between rounded-2xl bg-roxo px-6 text-base font-semibold hover:bg-roxo-2 disabled:opacity-70"
+                className="focus-ring mt-4 h-14 w-full rounded-2xl bg-roxo text-base font-semibold text-white hover:bg-roxo-2 disabled:opacity-70"
               >
-                {busy ? 'Enviando…' : 'Receber código'}
-                <span aria-hidden="true">›</span>
+                {busy ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <Loader2 aria-hidden="true" className="h-5 w-5 animate-spin" />
+                    Entrando…
+                  </span>
+                ) : (
+                  'Acessar aplicativo'
+                )}
               </Button>
             </form>
-          ) : (
-            <div className="mt-6">
-              <p className="text-xs font-bold uppercase tracking-widest text-roxo">Já recebeu o código?</p>
-              <div className="mt-3" aria-live="polite">
-                <InputOTP maxLength={6} value={code} onChange={setCode} containerClassName="justify-between gap-2 sm:gap-3">
-                  <InputOTPGroup className="gap-2 sm:gap-3">
-                    <InputOTPSlot index={0} className="h-14 w-11 rounded-xl border-linha bg-[#FCF8F1] text-lg font-semibold sm:w-12" />
-                    <InputOTPSlot index={1} className="h-14 w-11 rounded-xl border-linha bg-[#FCF8F1] text-lg font-semibold sm:w-12" />
-                    <InputOTPSlot index={2} className="h-14 w-11 rounded-xl border-linha bg-[#FCF8F1] text-lg font-semibold sm:w-12" />
-                  </InputOTPGroup>
-                  <InputOTPSeparator />
-                  <InputOTPGroup className="gap-2 sm:gap-3">
-                    <InputOTPSlot index={3} className="h-14 w-11 rounded-xl border-linha bg-[#FCF8F1] text-lg font-semibold sm:w-12" />
-                    <InputOTPSlot index={4} className="h-14 w-11 rounded-xl border-linha bg-[#FCF8F1] text-lg font-semibold sm:w-12" />
-                    <InputOTPSlot index={5} className="h-14 w-11 rounded-xl border-linha bg-[#FCF8F1] text-lg font-semibold sm:w-12" />
-                  </InputOTPGroup>
-                </InputOTP>
-              </div>
-              {error ? (
-                <p role="alert" className="mt-2 text-sm font-medium text-destructive">
-                  {error}
-                </p>
-              ) : null}
+          </div>
 
-              {devCode ? (
-                <div className="mt-4 rounded-xl border border-[#E5C96B] bg-[#FBF3DC] px-4 py-3" data-testid="dev-code-banner">
-                  <p className="text-xs font-bold uppercase tracking-wide text-[#7A5C12]">Modo de desenvolvimento · SMTP não configurado</p>
-                  <p className="mt-1 text-sm text-[#6B5313]">
-                    Em produção o código chega só por e-mail. Neste ambiente de teste, o código desta sessão é:{' '}
-                    <strong className="font-display text-base tracking-[0.3em] text-[#321053]">{devCode}</strong>
-                  </p>
-                </div>
-              ) : null}
-
-              <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2">
-                <Button
-                  onClick={() => void confirmCode()}
-                  disabled={busy || code.length !== 6}
-                  className="focus-ring h-12 flex-1 rounded-2xl bg-roxo px-6 text-base font-semibold hover:bg-roxo-2 disabled:opacity-70 sm:flex-none"
-                >
-                  {busy ? 'Confirmando…' : 'Confirmar código'}
-                </Button>
-                <button
-                  type="button"
-                  onClick={() => void requestCode()}
-                  disabled={cooldown > 0 || busy}
-                  className="focus-ring text-sm font-medium text-muted-foreground underline-offset-2 hover:text-roxo hover:underline disabled:opacity-60"
-                >
-                  {cooldown > 0 ? `Reenviar em ${cooldown} s` : 'Reenviar código'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep('email')
-                    setCode('')
-                    setError(null)
-                  }}
-                  className="focus-ring text-sm font-medium text-muted-foreground underline-offset-2 hover:text-roxo hover:underline"
-                >
-                  Trocar e-mail
-                </button>
-              </div>
-            </div>
-          )}
-
-          {appConfig?.demoMode ? (
-            <div className="mt-6 rounded-xl bg-lilas/70 px-4 py-3 text-[13px] leading-relaxed text-roxo-2">
-              <strong className="font-semibold">Ambiente de demonstração:</strong> use <code>demo@livrodossonhos.app</code> (pacote
-              completo), <code>pdf@livrodossonhos.app</code> (só PDF) ou <code>outro@livrodossonhos.app</code> (sem compra). Qualquer
-              e-mail recebe código neste modo.
-            </div>
-          ) : null}
-        </div>
-
-        <div className="mt-8 space-y-4 px-2 text-center">
-          <p className="text-sm leading-relaxed text-muted-foreground">
-            Comprou o pacote? O acesso aparece após a confirmação do pagamento.
-          </p>
-          <p className="text-sm">
-            <a href="mailto:suporte@livrodossonhos.app" className="focus-ring font-bold text-roxo underline-offset-2 hover:underline">
-              Precisa de ajuda?
+          {/* ajuda discreta */}
+          <p className="mt-5 text-center text-sm">
+            <a
+              href="mailto:suporte@livrodossonhos.app?subject=Preciso%20de%20ajuda%20para%20acessar"
+              className="focus-ring font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-roxo hover:underline"
+            >
+              Precisa de ajuda para acessar?
             </a>
           </p>
         </div>
-      </div>
+      </main>
+
+      {/* rodapé fixo ao fundo */}
+      <footer className="relative z-10 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 text-center">
+        <p className="text-xs text-muted-foreground">Livro dos Sonhos · consulta editorial</p>
+      </footer>
     </div>
   )
 }
