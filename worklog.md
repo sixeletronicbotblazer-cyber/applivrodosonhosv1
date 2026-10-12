@@ -100,3 +100,20 @@ Stage Summary:
 - Console sem erros/warnings; lint limpo; dev.log sem erros; sem rolagem horizontal em 390px; botão de acesso visível (top 440px em 844px).
 - Produção preservada: sem DEMO_MODE o /api/auth/access continua exigindo Entitlement ativo (purchase_not_found); integração segura do comprador segue como pendência documentada no README.
 - App deixado logado em #/inicio no browser de teste; screenshots em download/entrar-mobile-390.png, entrar-desktop-1280.png, inicio-desktop-logado.png, inicio-mobile-390-logado.png.
+
+---
+Task ID: 4
+Agent: Z.ai Code (orquestrador)
+Task: Publicação do projeto no GitHub (applivrodosonhosv1)
+
+Work Log:
+- Verificado repositório local (main, 6 commits; alterações de código já commitadas pelo ambiente; apenas db/custom.db pendente)
+- Auditado .env rastreado: continha somente DATABASE_URL local (sem segredos); removido do rastreamento com git rm --cached (arquivo mantido localmente)
+- Commit do banco local + commit de limpeza do .env
+- Remote origin apontado para github.com/sixeletronicbotblazer-cyber/applivrodosonhosv1.git; ls-remote confirmou repo vazio e token válido
+- Push de main executado com token inline (sem persistir o token em .git/config); upstream configurado para origin/main
+- Verificação: remote main = 05eccad (igual ao HEAD local), 166 arquivos (103 em src/), .env não rastreado
+
+Stage Summary:
+- Código completo do Livro dos Sonhos (incluindo correção do login Bearer+cookie da Task 3) publicado em main
+- Recomendação registrada: revogar/regenerar o token PAT compartilhado no chat após o uso
