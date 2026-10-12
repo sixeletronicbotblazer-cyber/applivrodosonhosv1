@@ -117,3 +117,26 @@ Work Log:
 Stage Summary:
 - Código completo do Livro dos Sonhos (incluindo correção do login Bearer+cookie da Task 3) publicado em main
 - Recomendação registrada: revogar/regenerar o token PAT compartilhado no chat após o uso
+
+---
+Task ID: 5
+Agent: Z.ai Code (orquestrador)
+Task: Republicar na Vercel, associar o domínio público ao deployment ativo e validar o fluxo em janela anônima
+
+Work Log:
+- Encontrado o deployment existente do projeto (projeto Vercel "applivrodosonhosv1" ligado ao GitHub; domínio público applivrodosonhosv1.vercel.app já apontava para o build anterior do repo)
+- Diagnóstico do deployment antigo: /api/config OK, porém POST /api/auth/access → HTTP 500 vazio (Prisma/SQLite quebrados no serverless) e demoMode=false; ou seja, login não funcionava na URL pública
+- Causa 1 — runtime Prisma no lambda: sem DATABASE_URL e sem engine para Amazon Linux. Correções: prisma/schema.prisma com binaryTargets ["native","rhel-openssl-1.0.x","rhel-openssl-3.0.x"]; build do package.json roda `prisma generate` antes do next build
+- Causa 2 — filesystem efêmero: src/lib/db.ts copia o banco empacotado (db/custom.db incluído via outputFileTracingIncludes "/api/**" no next.config.ts) para /tmp no cold start; serverExternalPackages @prisma/client
+- Causa 3 — cada rota de API é uma lambda com cópia própria do banco em /tmp (sessão/entitlement criados numa instância não existiam nas outras → 401 auth_required determinístico em index/animals/search/book). Correções: token de sessão stateless assinado HMAC (prefixo lds1., validação sem banco, segredo por VERCEL_URL, ativo SOMENTE na prévia DEMO_MODE+Vercel) em src/lib/auth.ts; entitlement demo derivado do e-mail sem escrita (demo-preview-*) em src/lib/entitlements.ts, preservando outro@ (sem compra) e pdf@ (só PDF)
+- Prévia pública: vercel.json com env DEMO_MODE=true + fallback determinístico no config.ts (VERCEL=1 sem variável → prévia); produção real permanece com DEMO_MODE=false + CAKTO_* documentados no README (nova seção "Deploy na Vercel")
+- Commits a24daac e 704b14a; push em main disparou auto-deploy da Vercel; novo build ativo confirmado pela troca do build id (tSHPjaTJRF9EX4INBpl5l → ea06PWUGrUxJmRGNiPn84) e demoMode:true
+- Validação por API no domínio público: access → 200 com token lds1. + entitlements; me, index, animals, book/pages, search "cavalo" (score 100) e entries?slug=cavalo → todos 200, repetidos em múltiplas rodadas (independência de instância)
+- Teste em janela anônima (Agent Browser, sessão isolada com storage/cookies zerados) em https://applivrodosonhosv1.vercel.app: abre #/entrar; e-mail inválido mostra "Confira o e-mail digitado — parece incompleto." abaixo do campo; e-mail válido + Acessar aplicativo → #/inicio imediato; reload continua logado; busca "cavalo" → verbete completo (pág. impressa 42, associações, editoriais, salvar); Livro (capa ok, abas Páginas/Índice A–Z); Ferramentas (tabela dos 25 bichos com badges); Sair → #/entrar com token limpo; segundo ciclo completo OK
+- Responsividade: sem rolagem horizontal em 390px; footer fixo; console sem erros/warnings
+
+Stage Summary:
+- URL pública final: https://applivrodosonhosv1.vercel.app (domínio público já associado ao deployment ativo de produção via integração Git; o push em main publica)
+- Login funciona fim a fim na URL pública em janela anônima (antes: HTTP 500 no access)
+- Prévia = acesso por qualquer e-mail (DEMO_MODE); produção real exige DEMO_MODE=false + credenciais Cakto no painel (documentado no README); persistência entre sessões/dados gravados continuam sujeitos ao efêmero /tmp do SQLite até migração para banco gerenciado (nota no README)
+- Screenshots: download/vercel-desktop-logado.png, download/vercel-mobile-390.png, download/vercel-inicio-segundo-ciclo.png
